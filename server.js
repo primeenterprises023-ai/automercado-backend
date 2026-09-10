@@ -1,4 +1,4 @@
-const express = require("express");
+const carRoutes = require("./src/routes/carRoutes");const express = require("express");
 const cors = require("cors");
 
 const authRoutes = require("./src/routes/authRoutes");
@@ -14,6 +14,7 @@ app.use(express.static("public"));
 
 // Rotas da API
 app.use("/api/auth", authRoutes);
+app.use("/api/cars", carRoutes);
 app.use("/api/products", productRoutes);
 
 // Teste do servidor
