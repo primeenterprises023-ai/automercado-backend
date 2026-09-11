@@ -43,7 +43,7 @@ router.post("/", authMiddleware, async (req, res) => {
           location,
           description,
           image_url,
-          status: "pending"
+          status: "approved"
         }
       ])
       .select()
