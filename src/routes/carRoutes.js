@@ -412,7 +412,7 @@ router.post(
         const { data: storageData, error: uploadError } =
           await supabase
             .storage
-            .from("car-images")
+            .from("Car-images")
             .upload(
               fileName,
               file.buffer,
@@ -443,7 +443,7 @@ router.post(
         const { data: publicUrlData } =
           supabase
             .storage
-            .from("car-images")
+            .from("Car-images")
             .getPublicUrl(fileName);
 
         const imageUrl =
@@ -456,7 +456,7 @@ router.post(
 
         const { data: imageData, error: imageError } =
           await supabase
-            .from("car_images")
+         .from("Car-images")
             .insert([
               {
                 car_id: req.params.id,
