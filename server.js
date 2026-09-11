@@ -1,11 +1,34 @@
-const carRoutes = require("./src/routes/carRoutes");const express = require("express");
+const express = require("express");
 const cors = require("cors");
+
+const app = express();
+
+app.use(cors({
+  origin: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+}));
+
+
+app.use(express.json());
+const helmet = require("helmet");
+const rateLimit = require("express-rate-limit");
+const carRoutes = require("./src/routes/carRoutes");
 
 const authRoutes = require("./src/routes/authRoutes");
 const productRoutes = require("./src/routes/productRoutes");
 
-const app = express();
+app.use(helmet());
 
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  message: {
+    error: "Muitas requisições. Tenta novamente mais tarde."
+  }
+});
+
+app.use(limiter);
 app.use(cors());
 app.use(express.json());
 
