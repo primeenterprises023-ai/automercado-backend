@@ -1,7 +1,18 @@
 const express = require("express");
 const cors = require("cors");
+const helmet = require("helmet");
+const rateLimit = require("express-rate-limit");
+
+const authRoutes = require("./src/routes/authRoutes");
+const carRoutes = require("./src/routes/carRoutes");
+const productRoutes = require("./src/routes/productRoutes");
 
 const app = express();
+
+
+// ================================
+// MIDDLEWARES
+// ================================
 
 app.use(cors({
   origin: true,
@@ -9,16 +20,14 @@ app.use(cors({
   allowedHeaders: ["Content-Type", "Authorization"]
 }));
 
-
 app.use(express.json());
-const helmet = require("helmet");
-const rateLimit = require("express-rate-limit");
-const carRoutes = require("./src/routes/carRoutes");
-
-const authRoutes = require("./src/routes/authRoutes");
-const productRoutes = require("./src/routes/productRoutes");
 
 app.use(helmet());
+
+
+// ================================
+// RATE LIMIT
+// ================================
 
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -29,23 +38,40 @@ const limiter = rateLimit({
 });
 
 app.use(limiter);
-app.use(cors());
-app.use(express.json());
 
-// Abrir os ficheiros HTML da pasta public
+
+// ================================
+// FICHEIROS PÚBLICOS
+// ================================
+
 app.use(express.static("public"));
 
-// Rotas da API
+
+// ================================
+// ROTAS DA API
+// ================================
+
 app.use("/api/auth", authRoutes);
+
 app.use("/api/cars", carRoutes);
+
 app.use("/api/products", productRoutes);
 
-// Teste do servidor
+
+// ================================
+// TESTE DO SERVIDOR
+// ================================
+
 app.get("/health", (req, res) => {
   res.json({
     status: "online"
   });
 });
+
+
+// ================================
+// INICIAR SERVIDOR
+// ================================
 
 const PORT = process.env.PORT || 3000;
 

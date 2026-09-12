@@ -358,24 +358,26 @@ router.delete("/:id", authMiddleware, async (req, res) => {
 // UPLOAD DE FOTOS
 // POST /api/cars/:id/images
 // ==========================================
-
 router.post(
   "/:id/images",
   authMiddleware,
   upload.array("images", 10),
   async (req, res) => {
+
     try {
 
-      console.log("=== INÍCIO UPLOAD ===");
+      console.log("========== UPLOAD ==========");
       console.log("CAR ID:", req.params.id);
+      console.log("USER ID:", req.user.id);
       console.log("FILES:", req.files?.length);
 
       if (!req.files || req.files.length === 0) {
         return res.status(400).json({
-          error: "Nenhuma imagem chegou ao servidor"
+          error: "Nenhuma imagem enviada"
         });
       }
 
+      // Procurar carro
       const { data: car, error: carError } = await supabase
         .from("cars")
         .select("*")
@@ -383,33 +385,35 @@ router.post(
         .single();
 
       if (carError || !car) {
-        console.log("ERRO CARRO:", carError);
+        console.log("CAR ERROR:", carError);
 
         return res.status(404).json({
           error: "Carro não encontrado"
         });
       }
 
+      // Verificar proprietário
       if (car.user_id !== req.user.id) {
         return res.status(403).json({
-          error: "Sem permissão"
+          error: "Não tens permissão"
         });
       }
 
       const uploadedImages = [];
 
+      // Enviar cada imagem
       for (const file of req.files) {
 
-        console.log("ENVIANDO FOTO:", {
-          nome: file.originalname,
-          tipo: file.mimetype,
-          tamanho: file.size
-        });
+        console.log("ENVIANDO:", file.originalname);
+
+        const safeName = file.originalname
+          .replace(/[^a-zA-Z0-9._-]/g, "_");
 
         const fileName =
-          `${req.user.id}/${req.params.id}/${Date.now()}-${file.originalname}`;
+          `${req.user.id}/${req.params.id}/${Date.now()}-${safeName}`;
 
-        const { data: storageData, error: uploadError } =
+        // Upload para Storage
+        const { data: uploadData, error: uploadError } =
           await supabase
             .storage
             .from("Car-images")
@@ -424,22 +428,20 @@ router.post(
 
         if (uploadError) {
 
-          console.error(
-            "ERRO SUPABASE STORAGE COMPLETO:",
+          console.log(
+            "ERRO STORAGE:",
             uploadError
           );
 
-          return res.status(400).json({
-            error: uploadError.message,
-            details: uploadError
-          });
+          continue;
         }
 
         console.log(
-          "STORAGE OK:",
-          storageData
+          "UPLOAD OK:",
+          uploadData
         );
 
+        // URL pública
         const { data: publicUrlData } =
           supabase
             .storage
@@ -450,59 +452,62 @@ router.post(
           publicUrlData.publicUrl;
 
         console.log(
-          "URL DA FOTO:",
+          "IMAGE URL:",
           imageUrl
         );
 
+        // Guardar imagem no banco
         const { data: imageData, error: imageError } =
           await supabase
-         .from("Car-images")
-            .insert([
-              {
-                car_id: req.params.id,
-                image_url: imageUrl
-              }
-            ])
+            .from("car_images")
+            .insert({
+              car_id: req.params.id,
+              image_url: imageUrl
+            })
             .select()
             .single();
 
         if (imageError) {
 
-          console.error(
+          console.log(
             "ERRO CAR_IMAGES:",
             imageError
           );
 
-          return res.status(400).json({
-            error: imageError.message,
-            details: imageError
-          });
+          continue;
         }
+
+        console.log(
+          "BANCO OK:",
+          imageData
+        );
 
         uploadedImages.push(imageData);
       }
 
-      console.log("=== UPLOAD CONCLUÍDO ===");
+      console.log(
+        "TOTAL UPLOAD:",
+        uploadedImages.length
+      );
 
-      return res.json({
+      res.json({
         message: "Fotos enviadas com sucesso",
         images: uploadedImages
       });
 
     } catch (error) {
 
-      console.error(
-        "ERRO CRÍTICO UPLOAD:",
+      console.log(
+        "ERRO GERAL UPLOAD:",
         error
       );
 
-      return res.status(500).json({
-        error: error.message || "Erro ao enviar imagens"
+      res.status(500).json({
+        error: "Erro ao enviar imagens"
       });
     }
   }
 );
-
 // ==========================================
 // EXPORTAR ROTAS
 // ==========================================
