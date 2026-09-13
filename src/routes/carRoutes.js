@@ -9,9 +9,20 @@ const router = express.Router();
 // os carros são aprovados imediatamente ao publicar (ver POST abaixo).
 const ALLOWED_STATUSES = ["approved", "paused", "sold"];
 
-// Quantos carros uma conta sem plano pago ("free") pode publicar. Uma conta
-// com plan="pro" não tem limite.
-const FREE_PLAN_CAR_LIMIT = 5;
+// Planos de subscrição da conta e quantos carros cada um permite publicar.
+// null = sem limite. Para acrescentar um plano novo, basta adicionar aqui
+// (o valor tem de corresponder ao que fica gravado em users.plan).
+const PLAN_LIMITS = {
+  free: 5,
+  stand: null
+};
+const DEFAULT_PLAN = "free";
+
+function getCarLimit(plan) {
+  return Object.prototype.hasOwnProperty.call(PLAN_LIMITS, plan)
+    ? PLAN_LIMITS[plan]
+    : PLAN_LIMITS[DEFAULT_PLAN];
+}
 
 // Validação partilhada entre POST (criar) e PUT (editar), para não duplicar
 // as mesmas regras nas duas rotas.
@@ -71,9 +82,9 @@ router.post("/", authMiddleware, async (req, res) => {
       });
     }
 
-    // Limite de anúncios do plano grátis. Uma conta com plan="pro" não tem
-    // limite. Isto conta TODOS os carros do utilizador (approved/paused/sold);
-    // apagar um carro liberta uma vaga.
+    // Limite de anúncios conforme o plano da conta (ver PLAN_LIMITS acima).
+    // Conta TODOS os carros do utilizador (approved/paused/sold); apagar um
+    // carro liberta uma vaga.
     const { data: userRow, error: userError } = await supabase
       .from("users")
       .select("plan")
@@ -86,7 +97,9 @@ router.post("/", authMiddleware, async (req, res) => {
       });
     }
 
-    if (userRow.plan !== "pro") {
+    const carLimit = getCarLimit(userRow.plan);
+
+    if (carLimit !== null) {
       const { count, error: countError } = await supabase
         .from("cars")
         .select("id", { count: "exact", head: true })
@@ -100,11 +113,11 @@ router.post("/", authMiddleware, async (req, res) => {
         });
       }
 
-      if ((count || 0) >= FREE_PLAN_CAR_LIMIT) {
+      if ((count || 0) >= carLimit) {
         return res.status(402).json({
-          error: `O plano grátis permite até ${FREE_PLAN_CAR_LIMIT} anúncios. Faz upgrade para publicares mais carros.`,
-          code: "FREE_PLAN_LIMIT_REACHED",
-          limit: FREE_PLAN_CAR_LIMIT
+          error: `O teu plano (${userRow.plan || DEFAULT_PLAN}) permite até ${carLimit} anúncios. Faz upgrade para publicares mais carros.`,
+          code: "PLAN_LIMIT_REACHED",
+          limit: carLimit
         });
       }
     }
