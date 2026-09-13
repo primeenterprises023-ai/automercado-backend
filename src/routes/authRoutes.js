@@ -45,7 +45,8 @@ router.post("/register", async (req, res) => {
       user: {
         id: data[0].id,
         name: data[0].name,
-        email: data[0].email
+        email: data[0].email,
+        plan: data[0].plan || "free"
       }
     });
 
@@ -113,7 +114,8 @@ router.post("/login", async (req, res) => {
       user: {
         id: user.id,
         name: user.name,
-        email: user.email
+        email: user.email,
+        plan: user.plan || "free"
       }
     });
 
@@ -136,7 +138,7 @@ router.get("/me", authMiddleware, async (req, res) => {
 
     const { data: user, error } = await supabase
       .from("users")
-      .select("id, name, email, created_at")
+      .select("id, name, email, plan, created_at")
       .eq("id", req.user.id)
       .single();
 
