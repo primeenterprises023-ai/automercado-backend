@@ -9,6 +9,10 @@ const router = express.Router();
 // os carros são aprovados imediatamente ao publicar (ver POST abaixo).
 const ALLOWED_STATUSES = ["approved", "paused", "sold"];
 
+// Quantos carros uma conta sem plano pago ("free") pode publicar. Uma conta
+// com plan="pro" não tem limite.
+const FREE_PLAN_CAR_LIMIT = 5;
+
 // Validação partilhada entre POST (criar) e PUT (editar), para não duplicar
 // as mesmas regras nas duas rotas.
 function validateCarPayload({ brand, model, year, price, mileage }) {
@@ -65,6 +69,44 @@ router.post("/", authMiddleware, async (req, res) => {
       return res.status(400).json({
         error: validationError
       });
+    }
+
+    // Limite de anúncios do plano grátis. Uma conta com plan="pro" não tem
+    // limite. Isto conta TODOS os carros do utilizador (approved/paused/sold);
+    // apagar um carro liberta uma vaga.
+    const { data: userRow, error: userError } = await supabase
+      .from("users")
+      .select("plan")
+      .eq("id", req.user.id)
+      .single();
+
+    if (userError || !userRow) {
+      return res.status(404).json({
+        error: "Utilizador não encontrado"
+      });
+    }
+
+    if (userRow.plan !== "pro") {
+      const { count, error: countError } = await supabase
+        .from("cars")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", req.user.id);
+
+      if (countError) {
+        console.log("ERRO AO CONTAR CARROS:", countError);
+
+        return res.status(500).json({
+          error: "Erro interno do servidor"
+        });
+      }
+
+      if ((count || 0) >= FREE_PLAN_CAR_LIMIT) {
+        return res.status(402).json({
+          error: `O plano grátis permite até ${FREE_PLAN_CAR_LIMIT} anúncios. Faz upgrade para publicares mais carros.`,
+          code: "FREE_PLAN_LIMIT_REACHED",
+          limit: FREE_PLAN_CAR_LIMIT
+        });
+      }
     }
 
     const { data, error } = await supabase
