@@ -5,6 +5,41 @@ const upload = require("../middleware/uploadMiddleware");
 
 const router = express.Router();
 
+// Status possíveis para um carro. "pending" não é usado automaticamente —
+// os carros são aprovados imediatamente ao publicar (ver POST abaixo).
+const ALLOWED_STATUSES = ["approved", "paused", "sold"];
+
+// Validação partilhada entre POST (criar) e PUT (editar), para não duplicar
+// as mesmas regras nas duas rotas.
+function validateCarPayload({ brand, model, year, price, mileage }) {
+  if (!brand || !model || !year || !price) {
+    return "Marca, modelo, ano e preço são obrigatórios";
+  }
+
+  const numericYear = Number(year);
+  const numericPrice = Number(price);
+  const numericMileage =
+    mileage === undefined || mileage === null || mileage === ""
+      ? 0
+      : Number(mileage);
+
+  const currentYear = new Date().getFullYear();
+
+  if (!Number.isFinite(numericYear) || numericYear < 1900 || numericYear > currentYear + 1) {
+    return "Ano inválido";
+  }
+
+  if (!Number.isFinite(numericPrice) || numericPrice <= 0) {
+    return "Preço tem de ser um valor positivo";
+  }
+
+  if (!Number.isFinite(numericMileage) || numericMileage < 0) {
+    return "Quilometragem inválida";
+  }
+
+  return null;
+}
+
 
 // ==========================================
 // PUBLICAR CARRO
@@ -24,9 +59,11 @@ router.post("/", authMiddleware, async (req, res) => {
       image_url
     } = req.body;
 
-    if (!brand || !model || !year || !price) {
+    const validationError = validateCarPayload({ brand, model, year, price, mileage });
+
+    if (validationError) {
       return res.status(400).json({
-        error: "Marca, modelo, ano e preço são obrigatórios"
+        error: validationError
       });
     }
 
@@ -262,6 +299,17 @@ router.put("/:id", authMiddleware, async (req, res) => {
       description
     } = req.body;
 
+    const validationError = validateCarPayload({ brand, model, year, price, mileage });
+
+    if (validationError) {
+      return res.status(400).json({
+        error: validationError
+      });
+    }
+
+    // IMPORTANTE: não incluir "status" aqui. O AutoMercado tem aprovação
+    // imediata — um carro aprovado deve continuar aprovado depois de
+    // editado, e não voltar a "pending" automaticamente.
     const { data, error } = await supabase
       .from("cars")
       .update({
@@ -271,8 +319,7 @@ router.put("/:id", authMiddleware, async (req, res) => {
         price,
         mileage,
         location,
-        description,
-        status: "pending"
+        description
       })
       .eq("id", req.params.id)
       .select()
@@ -327,6 +374,51 @@ router.delete("/:id", authMiddleware, async (req, res) => {
       });
     }
 
+    // Apagar primeiro as imagens (Storage + tabela car_images), para não
+    // deixar ficheiros nem registos órfãos depois de apagar o carro.
+    const { data: images, error: imagesError } = await supabase
+      .from("car_images")
+      .select("*")
+      .eq("car_id", req.params.id);
+
+    if (imagesError) {
+      console.log("ERRO AO BUSCAR IMAGENS PARA APAGAR:", imagesError);
+    }
+
+    if (images && images.length > 0) {
+      const bucketMarker = "/Car-images/";
+
+      const storagePaths = images
+        .map((image) => {
+          const url = image.image_url || "";
+          const index = url.indexOf(bucketMarker);
+          return index === -1 ? null : url.slice(index + bucketMarker.length);
+        })
+        .filter(Boolean);
+
+      if (storagePaths.length > 0) {
+        const { error: removeError } = await supabase
+          .storage
+          .from("Car-images")
+          .remove(storagePaths);
+
+        if (removeError) {
+          // Não bloqueia o apagar do carro — evita sobretudo deixar
+          // registos car_images órfãos, que é o pior dos dois casos.
+          console.log("ERRO AO APAGAR FICHEIROS DO STORAGE:", removeError);
+        }
+      }
+
+      const { error: deleteImagesError } = await supabase
+        .from("car_images")
+        .delete()
+        .eq("car_id", req.params.id);
+
+      if (deleteImagesError) {
+        console.log("ERRO AO APAGAR REGISTOS car_images:", deleteImagesError);
+      }
+    }
+
     const { error } = await supabase
       .from("cars")
       .delete()
@@ -342,6 +434,70 @@ router.delete("/:id", authMiddleware, async (req, res) => {
 
     res.json({
       message: "Carro apagado com sucesso"
+    });
+
+  } catch (error) {
+    console.log("ERRO INTERNO:", error);
+
+    res.status(500).json({
+      error: "Erro interno do servidor"
+    });
+  }
+});
+
+
+// ==========================================
+// ALTERAR STATUS (pausar / reativar / marcar vendido)
+// PATCH /api/cars/:id/status
+// ==========================================
+
+router.patch("/:id/status", authMiddleware, async (req, res) => {
+  try {
+
+    const { status } = req.body;
+
+    if (!ALLOWED_STATUSES.includes(status)) {
+      return res.status(400).json({
+        error: `Status inválido. Usa um destes: ${ALLOWED_STATUSES.join(", ")}`
+      });
+    }
+
+    const { data: car, error: carError } = await supabase
+      .from("cars")
+      .select("*")
+      .eq("id", req.params.id)
+      .single();
+
+    if (carError || !car) {
+      return res.status(404).json({
+        error: "Carro não encontrado"
+      });
+    }
+
+    if (car.user_id !== req.user.id) {
+      return res.status(403).json({
+        error: "Não tens permissão para alterar este carro"
+      });
+    }
+
+    const { data, error } = await supabase
+      .from("cars")
+      .update({ status })
+      .eq("id", req.params.id)
+      .select()
+      .single();
+
+    if (error) {
+      console.log("ERRO SUPABASE:", error);
+
+      return res.status(400).json({
+        error: error.message
+      });
+    }
+
+    res.json({
+      message: "Status atualizado com sucesso",
+      car: data
     });
 
   } catch (error) {
