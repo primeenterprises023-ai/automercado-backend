@@ -13,9 +13,9 @@ const router = express.Router();
 
 router.post("/register", async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, email, password, phone } = req.body;
 
-    if (!name || !email || !password) {
+    if (!name || !email || !password || !phone) {
       return res.status(400).json({
         error: "Preencha todos os campos"
       });
@@ -29,7 +29,8 @@ router.post("/register", async (req, res) => {
         {
           name,
           email,
-          password: hashedPassword
+          password: hashedPassword,
+          phone
         }
       ])
       .select();
@@ -46,7 +47,7 @@ router.post("/register", async (req, res) => {
         id: data[0].id,
         name: data[0].name,
         email: data[0].email,
-        plan: data[0].plan || "free"
+        phone: data[0].phone
       }
     });
 
@@ -115,7 +116,7 @@ router.post("/login", async (req, res) => {
         id: user.id,
         name: user.name,
         email: user.email,
-        plan: user.plan || "free"
+        phone: user.phone
       }
     });
 
@@ -138,7 +139,7 @@ router.get("/me", authMiddleware, async (req, res) => {
 
     const { data: user, error } = await supabase
       .from("users")
-      .select("id, name, email, plan, created_at")
+      .select("id, name, email, created_at")
       .eq("id", req.user.id)
       .single();
 
@@ -168,19 +169,19 @@ router.get("/me", authMiddleware, async (req, res) => {
 
 router.put("/profile", authMiddleware, async (req, res) => {
   try {
-    const { name } = req.body;
+    const { name, phone } = req.body;
 
-    if (!name) {
+    if (!name || !phone) {
       return res.status(400).json({
-        error: "O nome é obrigatório"
+        error: "Nome e telefone são obrigatórios"
       });
     }
 
     const { data, error } = await supabase
       .from("users")
-      .update({ name })
+      .update({ name, phone })
       .eq("id", req.user.id)
-      .select()
+      .select("id, name, email, phone")
       .single();
 
     if (error) {
