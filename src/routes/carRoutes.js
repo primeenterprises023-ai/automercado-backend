@@ -5,56 +5,6 @@ const upload = require("../middleware/uploadMiddleware");
 
 const router = express.Router();
 
-// Status possíveis para um carro. "pending" não é usado automaticamente —
-// os carros são aprovados imediatamente ao publicar (ver POST abaixo).
-const ALLOWED_STATUSES = ["approved", "paused", "sold"];
-
-// Planos de subscrição da conta e quantos carros cada um permite publicar.
-// null = sem limite. Para acrescentar um plano novo, basta adicionar aqui
-// (o valor tem de corresponder ao que fica gravado em users.plan).
-const PLAN_LIMITS = {
-  free: 5,
-  stand: null
-};
-const DEFAULT_PLAN = "free";
-
-function getCarLimit(plan) {
-  return Object.prototype.hasOwnProperty.call(PLAN_LIMITS, plan)
-    ? PLAN_LIMITS[plan]
-    : PLAN_LIMITS[DEFAULT_PLAN];
-}
-
-// Validação partilhada entre POST (criar) e PUT (editar), para não duplicar
-// as mesmas regras nas duas rotas.
-function validateCarPayload({ brand, model, year, price, mileage }) {
-  if (!brand || !model || !year || !price) {
-    return "Marca, modelo, ano e preço são obrigatórios";
-  }
-
-  const numericYear = Number(year);
-  const numericPrice = Number(price);
-  const numericMileage =
-    mileage === undefined || mileage === null || mileage === ""
-      ? 0
-      : Number(mileage);
-
-  const currentYear = new Date().getFullYear();
-
-  if (!Number.isFinite(numericYear) || numericYear < 1900 || numericYear > currentYear + 1) {
-    return "Ano inválido";
-  }
-
-  if (!Number.isFinite(numericPrice) || numericPrice <= 0) {
-    return "Preço tem de ser um valor positivo";
-  }
-
-  if (!Number.isFinite(numericMileage) || numericMileage < 0) {
-    return "Quilometragem inválida";
-  }
-
-  return null;
-}
-
 
 // ==========================================
 // PUBLICAR CARRO
@@ -74,52 +24,10 @@ router.post("/", authMiddleware, async (req, res) => {
       image_url
     } = req.body;
 
-    const validationError = validateCarPayload({ brand, model, year, price, mileage });
-
-    if (validationError) {
+    if (!brand || !model || !year || !price) {
       return res.status(400).json({
-        error: validationError
+        error: "Marca, modelo, ano e preço são obrigatórios"
       });
-    }
-
-    // Limite de anúncios conforme o plano da conta (ver PLAN_LIMITS acima).
-    // Conta TODOS os carros do utilizador (approved/paused/sold); apagar um
-    // carro liberta uma vaga.
-    const { data: userRow, error: userError } = await supabase
-      .from("users")
-      .select("plan")
-      .eq("id", req.user.id)
-      .single();
-
-    if (userError || !userRow) {
-      return res.status(404).json({
-        error: "Utilizador não encontrado"
-      });
-    }
-
-    const carLimit = getCarLimit(userRow.plan);
-
-    if (carLimit !== null) {
-      const { count, error: countError } = await supabase
-        .from("cars")
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", req.user.id);
-
-      if (countError) {
-        console.log("ERRO AO CONTAR CARROS:", countError);
-
-        return res.status(500).json({
-          error: "Erro interno do servidor"
-        });
-      }
-
-      if ((count || 0) >= carLimit) {
-        return res.status(402).json({
-          error: `O teu plano (${userRow.plan || DEFAULT_PLAN}) permite até ${carLimit} anúncios. Faz upgrade para publicares mais carros.`,
-          code: "PLAN_LIMIT_REACHED",
-          limit: carLimit
-        });
-      }
     }
 
     const { data, error } = await supabase
@@ -215,9 +123,33 @@ router.get("/", async (req, res) => {
       imagesByCar[image.car_id].push(image);
     }
 
+    // Número de contacto do vendedor: vem da conta dele (tabela users,
+    // preenchida no registo) — não é um campo do carro.
+    const sellerIds = [...new Set(cars.map(car => car.user_id))];
+
+    const { data: sellers, error: sellersError } = await supabase
+      .from("users")
+      .select("id, phone")
+      .in("id", sellerIds);
+
+    if (sellersError) {
+      console.error("Erro ao buscar contacto dos vendedores:", sellersError);
+
+      return res.status(400).json({
+        error: sellersError.message
+      });
+    }
+
+    const phoneBySeller = {};
+
+    for (const seller of sellers || []) {
+      phoneBySeller[seller.id] = seller.phone;
+    }
+
     const carsWithImages = cars.map(car => ({
       ...car,
-      images: imagesByCar[car.id] || []
+      images: imagesByCar[car.id] || [],
+      seller_phone: phoneBySeller[car.user_id] || ""
     }));
 
     res.json({
@@ -257,8 +189,21 @@ router.get("/my/cars", authMiddleware, async (req, res) => {
       });
     }
 
+    // Mesmo número usado nos anúncios públicos: vem da conta do próprio
+    // vendedor autenticado.
+    const { data: sellerData } = await supabase
+      .from("users")
+      .select("phone")
+      .eq("id", req.user.id)
+      .single();
+
+    const cars = (data || []).map(car => ({
+      ...car,
+      seller_phone: (sellerData && sellerData.phone) || ""
+    }));
+
     res.json({
-      cars: data
+      cars
     });
 
   } catch (error) {
@@ -303,8 +248,19 @@ router.get("/:id", async (req, res) => {
       console.log("ERRO AO BUSCAR IMAGENS:", imagesError);
     }
 
+    // Número de contacto do vendedor, vindo da conta dele (tabela users).
+    const { data: sellerData, error: sellerError } = await supabase
+      .from("users")
+      .select("phone")
+      .eq("id", car.user_id)
+      .single();
+
+    if (sellerError) {
+      console.log("ERRO AO BUSCAR CONTACTO DO VENDEDOR:", sellerError);
+    }
+
     res.json({
-      car,
+      car: { ...car, seller_phone: (sellerData && sellerData.phone) || "" },
       images: images || []
     });
 
@@ -354,17 +310,6 @@ router.put("/:id", authMiddleware, async (req, res) => {
       description
     } = req.body;
 
-    const validationError = validateCarPayload({ brand, model, year, price, mileage });
-
-    if (validationError) {
-      return res.status(400).json({
-        error: validationError
-      });
-    }
-
-    // IMPORTANTE: não incluir "status" aqui. O AutoMercado tem aprovação
-    // imediata — um carro aprovado deve continuar aprovado depois de
-    // editado, e não voltar a "pending" automaticamente.
     const { data, error } = await supabase
       .from("cars")
       .update({
@@ -374,7 +319,8 @@ router.put("/:id", authMiddleware, async (req, res) => {
         price,
         mileage,
         location,
-        description
+        description,
+        status: "pending"
       })
       .eq("id", req.params.id)
       .select()
@@ -429,51 +375,6 @@ router.delete("/:id", authMiddleware, async (req, res) => {
       });
     }
 
-    // Apagar primeiro as imagens (Storage + tabela car_images), para não
-    // deixar ficheiros nem registos órfãos depois de apagar o carro.
-    const { data: images, error: imagesError } = await supabase
-      .from("car_images")
-      .select("*")
-      .eq("car_id", req.params.id);
-
-    if (imagesError) {
-      console.log("ERRO AO BUSCAR IMAGENS PARA APAGAR:", imagesError);
-    }
-
-    if (images && images.length > 0) {
-      const bucketMarker = "/Car-images/";
-
-      const storagePaths = images
-        .map((image) => {
-          const url = image.image_url || "";
-          const index = url.indexOf(bucketMarker);
-          return index === -1 ? null : url.slice(index + bucketMarker.length);
-        })
-        .filter(Boolean);
-
-      if (storagePaths.length > 0) {
-        const { error: removeError } = await supabase
-          .storage
-          .from("Car-images")
-          .remove(storagePaths);
-
-        if (removeError) {
-          // Não bloqueia o apagar do carro — evita sobretudo deixar
-          // registos car_images órfãos, que é o pior dos dois casos.
-          console.log("ERRO AO APAGAR FICHEIROS DO STORAGE:", removeError);
-        }
-      }
-
-      const { error: deleteImagesError } = await supabase
-        .from("car_images")
-        .delete()
-        .eq("car_id", req.params.id);
-
-      if (deleteImagesError) {
-        console.log("ERRO AO APAGAR REGISTOS car_images:", deleteImagesError);
-      }
-    }
-
     const { error } = await supabase
       .from("cars")
       .delete()
@@ -489,70 +390,6 @@ router.delete("/:id", authMiddleware, async (req, res) => {
 
     res.json({
       message: "Carro apagado com sucesso"
-    });
-
-  } catch (error) {
-    console.log("ERRO INTERNO:", error);
-
-    res.status(500).json({
-      error: "Erro interno do servidor"
-    });
-  }
-});
-
-
-// ==========================================
-// ALTERAR STATUS (pausar / reativar / marcar vendido)
-// PATCH /api/cars/:id/status
-// ==========================================
-
-router.patch("/:id/status", authMiddleware, async (req, res) => {
-  try {
-
-    const { status } = req.body;
-
-    if (!ALLOWED_STATUSES.includes(status)) {
-      return res.status(400).json({
-        error: `Status inválido. Usa um destes: ${ALLOWED_STATUSES.join(", ")}`
-      });
-    }
-
-    const { data: car, error: carError } = await supabase
-      .from("cars")
-      .select("*")
-      .eq("id", req.params.id)
-      .single();
-
-    if (carError || !car) {
-      return res.status(404).json({
-        error: "Carro não encontrado"
-      });
-    }
-
-    if (car.user_id !== req.user.id) {
-      return res.status(403).json({
-        error: "Não tens permissão para alterar este carro"
-      });
-    }
-
-    const { data, error } = await supabase
-      .from("cars")
-      .update({ status })
-      .eq("id", req.params.id)
-      .select()
-      .single();
-
-    if (error) {
-      console.log("ERRO SUPABASE:", error);
-
-      return res.status(400).json({
-        error: error.message
-      });
-    }
-
-    res.json({
-      message: "Status atualizado com sucesso",
-      car: data
     });
 
   } catch (error) {
