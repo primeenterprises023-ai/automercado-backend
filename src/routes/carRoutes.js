@@ -123,33 +123,29 @@ router.get("/", async (req, res) => {
       imagesByCar[image.car_id].push(image);
     }
 
-    // Número de contacto do vendedor: vem da conta dele (tabela users,
-    // preenchida no registo) — não é um campo do carro.
-    const sellerIds = [...new Set(cars.map(car => car.user_id))];
+    // Dados do vendedor (nome/telefone) para o botão de contacto/WhatsApp
+    const sellerIds = [...new Set(cars.map(car => car.user_id).filter(Boolean))];
 
     const { data: sellers, error: sellersError } = await supabase
       .from("users")
-      .select("id, phone")
+      .select("id, name, phone")
       .in("id", sellerIds);
 
     if (sellersError) {
-      console.error("Erro ao buscar contacto dos vendedores:", sellersError);
-
-      return res.status(400).json({
-        error: sellersError.message
-      });
+      console.error("Erro ao buscar vendedores:", sellersError);
     }
 
-    const phoneBySeller = {};
+    const sellerById = {};
 
     for (const seller of sellers || []) {
-      phoneBySeller[seller.id] = seller.phone;
+      sellerById[seller.id] = seller;
     }
 
     const carsWithImages = cars.map(car => ({
       ...car,
       images: imagesByCar[car.id] || [],
-      seller_phone: phoneBySeller[car.user_id] || ""
+      seller_name: (sellerById[car.user_id] || {}).name || null,
+      seller_phone: (sellerById[car.user_id] || {}).phone || null
     }));
 
     res.json({
@@ -189,21 +185,8 @@ router.get("/my/cars", authMiddleware, async (req, res) => {
       });
     }
 
-    // Mesmo número usado nos anúncios públicos: vem da conta do próprio
-    // vendedor autenticado.
-    const { data: sellerData } = await supabase
-      .from("users")
-      .select("phone")
-      .eq("id", req.user.id)
-      .single();
-
-    const cars = (data || []).map(car => ({
-      ...car,
-      seller_phone: (sellerData && sellerData.phone) || ""
-    }));
-
     res.json({
-      cars
+      cars: data
     });
 
   } catch (error) {
@@ -248,19 +231,26 @@ router.get("/:id", async (req, res) => {
       console.log("ERRO AO BUSCAR IMAGENS:", imagesError);
     }
 
-    // Número de contacto do vendedor, vindo da conta dele (tabela users).
-    const { data: sellerData, error: sellerError } = await supabase
-      .from("users")
-      .select("phone")
-      .eq("id", car.user_id)
-      .single();
+    let seller_name = null;
+    let seller_phone = null;
 
-    if (sellerError) {
-      console.log("ERRO AO BUSCAR CONTACTO DO VENDEDOR:", sellerError);
+    if (car.user_id) {
+      const { data: seller, error: sellerError } = await supabase
+        .from("users")
+        .select("name, phone")
+        .eq("id", car.user_id)
+        .single();
+
+      if (sellerError) {
+        console.log("ERRO AO BUSCAR VENDEDOR:", sellerError);
+      } else if (seller) {
+        seller_name = seller.name;
+        seller_phone = seller.phone;
+      }
     }
 
     res.json({
-      car: { ...car, seller_phone: (sellerData && sellerData.phone) || "" },
+      car: { ...car, seller_name, seller_phone },
       images: images || []
     });
 
@@ -448,6 +438,7 @@ router.post(
       }
 
       const uploadedImages = [];
+      const failedFiles = [];
 
       // Enviar cada imagem
       for (const file of req.files) {
@@ -481,6 +472,7 @@ router.post(
             uploadError
           );
 
+          failedFiles.push({ name: file.originalname, reason: uploadError.message });
           continue;
         }
 
@@ -522,6 +514,7 @@ router.post(
             imageError
           );
 
+          failedFiles.push({ name: file.originalname, reason: imageError.message });
           continue;
         }
 
@@ -535,12 +528,28 @@ router.post(
 
       console.log(
         "TOTAL UPLOAD:",
-        uploadedImages.length
+        uploadedImages.length,
+        "FALHAS:",
+        failedFiles.length
       );
 
+      // Antes, esta rota respondia sempre com sucesso (200) mesmo quando
+      // nenhuma imagem era guardada (ex.: bucket "Car-images" sem
+      // permissões públicas configuradas no Supabase) — o anúncio ficava
+      // sem fotos e ninguém era avisado do problema.
+      if (uploadedImages.length === 0) {
+        return res.status(500).json({
+          error: "Não foi possível guardar nenhuma das imagens. Verifica a ligação e tenta novamente.",
+          failedFiles
+        });
+      }
+
       res.json({
-        message: "Fotos enviadas com sucesso",
-        images: uploadedImages
+        message: failedFiles.length > 0
+          ? `${uploadedImages.length} de ${req.files.length} fotos enviadas com sucesso`
+          : "Fotos enviadas com sucesso",
+        images: uploadedImages,
+        failedCount: failedFiles.length
       });
 
     } catch (error) {
