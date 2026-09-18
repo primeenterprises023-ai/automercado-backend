@@ -6,6 +6,9 @@ const rateLimit = require("express-rate-limit");
 const authRoutes = require("./src/routes/authRoutes");
 const carRoutes = require("./src/routes/carRoutes");
 const productRoutes = require("./src/routes/productRoutes");
+const adminRoutes = require("./src/routes/adminRoutes");
+const authMiddleware = require("./src/middleware/authMiddleware");
+const adminMiddleware = require("./src/middleware/adminMiddleware");
 
 const app = express();
 
@@ -56,6 +59,8 @@ app.use("/api/auth", authRoutes);
 app.use("/api/cars", carRoutes);
 
 app.use("/api/products", productRoutes);
+
+app.use("/api/admin", authMiddleware, adminMiddleware, adminRoutes);
 
 
 // ================================
