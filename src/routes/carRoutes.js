@@ -340,6 +340,75 @@ router.put("/:id", authMiddleware, async (req, res) => {
 
 
 // ==========================================
+// ATUALIZAR ESTADO DO ANÚNCIO (pausar / reativar / marcar como vendido)
+// PATCH /api/cars/:id/status
+// Esta rota não existia no backend — por isso os botões de pausar,
+// reativar e marcar como vendido no painel do vendedor não funcionavam
+// (o pedido do frontend caía sempre num 404).
+// ==========================================
+
+router.patch("/:id/status", authMiddleware, async (req, res) => {
+  try {
+
+    const { data: car, error: carError } = await supabase
+      .from("cars")
+      .select("*")
+      .eq("id", req.params.id)
+      .single();
+
+    if (carError || !car) {
+      return res.status(404).json({
+        error: "Carro não encontrado"
+      });
+    }
+
+    if (car.user_id !== req.user.id) {
+      return res.status(403).json({
+        error: "Não tens permissão para alterar este carro"
+      });
+    }
+
+    const { status } = req.body;
+
+    const allowedStatus = ["approved", "pending", "rejected", "sold", "paused"];
+
+    if (!allowedStatus.includes(status)) {
+      return res.status(400).json({
+        error: "Estado inválido"
+      });
+    }
+
+    const { data, error } = await supabase
+      .from("cars")
+      .update({ status })
+      .eq("id", req.params.id)
+      .select()
+      .single();
+
+    if (error) {
+      console.log("ERRO SUPABASE:", error);
+
+      return res.status(400).json({
+        error: error.message
+      });
+    }
+
+    res.json({
+      message: "Estado do anúncio atualizado",
+      car: data
+    });
+
+  } catch (error) {
+    console.log("ERRO INTERNO:", error);
+
+    res.status(500).json({
+      error: "Erro interno do servidor"
+    });
+  }
+});
+
+
+// ==========================================
 // APAGAR CARRO
 // DELETE /api/cars/:id
 // ==========================================
