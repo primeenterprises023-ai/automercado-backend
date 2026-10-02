@@ -988,12 +988,23 @@ let SEED_VEHICLES = [
 const STORE_KEYS = { VEHICLES:'vehicles_db_v1', REPORTS:'reports_db_v1', MESSAGES:'messages_db_v1', SESSION:'session_v1', FAVORITES:'favorites_v1', HISTORY:'history_v1', NOTIFS:'notifications_v1', RATINGS:'ratings_db_v1' };
 
 async function storageGet(key, shared){
-  try{ const res = await window.storage.get(key, !!shared); return res ? JSON.parse(res.value) : null; }
-  catch(e){ return null; }
+  try{
+    const value = localStorage.getItem(key);
+    return value ? JSON.parse(value) : null;
+  }catch(e){
+    console.error("Falha ao ler", key, e);
+    return null;
+  }
 }
+
 async function storageSet(key, value, shared){
-  try{ await window.storage.set(key, JSON.stringify(value), !!shared); return true; }
-  catch(e){ console.error('Falha ao gravar', key, e); return false; }
+  try{
+    localStorage.setItem(key, JSON.stringify(value));
+    return true;
+  }catch(e){
+    console.error("Falha ao gravar", key, e);
+    return false;
+  }
 }
 
 const state = {
