@@ -1,7 +1,18 @@
+require("dotenv").config();
+
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
+
+const { createClient } = require("@supabase/supabase-js");
+
+const supabaseAdmin = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
+
+const authResetRoutes = require("./auth-reset-routes")(supabaseAdmin);
 
 const authRoutes = require("./src/routes/authRoutes");
 const carRoutes = require("./src/routes/carRoutes");
@@ -26,7 +37,7 @@ app.use(cors({
 app.use(express.json());
 
 app.use(helmet());
-
+app.use('/api/auth', authResetRoutes);
 
 // ================================
 // RATE LIMIT

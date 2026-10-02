@@ -310,7 +310,6 @@ router.put("/:id", authMiddleware, async (req, res) => {
         mileage,
         location,
         description,
-        status: "pending"
       })
       .eq("id", req.params.id)
       .select()
