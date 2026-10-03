@@ -1,25 +1,11 @@
-require("dotenv").config();
-
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 
-const { createClient } = require("@supabase/supabase-js");
-
-const supabaseAdmin = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
-
-const authResetRoutes = require("./auth-reset-routes")(supabaseAdmin);
-
 const authRoutes = require("./src/routes/authRoutes");
 const carRoutes = require("./src/routes/carRoutes");
 const productRoutes = require("./src/routes/productRoutes");
-const adminRoutes = require("./src/routes/adminRoutes");
-const authMiddleware = require("./src/middleware/authMiddleware");
-const adminMiddleware = require("./src/middleware/adminMiddleware");
 
 const app = express();
 
@@ -30,14 +16,14 @@ const app = express();
 
 app.use(cors({
   origin: true,
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"]
 }));
 
 app.use(express.json());
 
 app.use(helmet());
-app.use('/api/auth', authResetRoutes);
+
 
 // ================================
 // RATE LIMIT
@@ -70,8 +56,6 @@ app.use("/api/auth", authRoutes);
 app.use("/api/cars", carRoutes);
 
 app.use("/api/products", productRoutes);
-
-app.use("/api/admin", authMiddleware, adminMiddleware, adminRoutes);
 
 
 // ================================
