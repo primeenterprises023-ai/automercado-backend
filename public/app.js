@@ -200,7 +200,7 @@ async function storageSet(key, value, shared){
 }
 
 const state = {
-  vehicles: [], myVehicles: [], reports: [], messages: [], favorites: [], history: [], notifications: [], ratings: [],
+  vehicles: [], myVehicles: [], rentals: [], reports: [], messages: [], favorites: [], history: [], notifications: [], ratings: [],
   session: null,
   route: { name:'home', params:{} },
   filters: {},
@@ -383,6 +383,9 @@ function renderSignupPage(){
       <div class="form-grid-2">
         <div class="field"><label>Email</label><input type="email" name="email" required placeholder="tu@email.com" autocomplete="email"></div>
         <div class="field"><label>Telefone</label><input type="text" name="telefone" required placeholder="+244 9XX XXX XXX" autocomplete="tel"></div>
+      </div>
+      <div class="field"><label>Província</label><select name="provincia" required><option value="">Seleciona a tua província</option>${selectOptions(PROVINCES)}</select>
+        <span class="field-hint">Aparece a quem quiser contactar-te sobre um anúncio.</span>
       </div>
       <div class="form-grid-2">
         <div class="field"><label>Palavra-passe</label><input type="password" name="password" required minlength="6" placeholder="Mínimo 6 caracteres" autocomplete="new-password"></div>
@@ -585,6 +588,8 @@ function bindAuthPageEvents(mode){
 
           telefone: data.user.phone || '',
 
+          provincia: data.user.province || '',
+
           plan: data.user.plan || 'free',
 
           autenticado: true,
@@ -668,6 +673,10 @@ function bindAuthPageEvents(mode){
           (fd.get('telefone') || '').trim();
 
 
+        const provincia =
+          (fd.get('provincia') || '').trim();
+
+
         const password =
           fd.get('password') || '';
 
@@ -685,7 +694,7 @@ function bindAuthPageEvents(mode){
 
         // VALIDAR CAMPOS
 
-        if(!nome || !email || !telefone){
+        if(!nome || !email || !telefone || !provincia){
 
           err.textContent =
             'Preenche todos os campos.';
@@ -759,7 +768,9 @@ function bindAuthPageEvents(mode){
 
                 password: password,
 
-                phone: telefone
+                phone: telefone,
+
+                province: provincia
 
               })
 
@@ -940,6 +951,8 @@ function hashFor(name, params){
   if(name==='signup') return 'criar-conta.html';
   if(name==='forgot') return 'recuperar-password.html';
   if(name==='resetPassword') return withQuery('redefinir-password.html');
+  if(name==='rentals') return withQuery('alugar.html');
+  if(name==='publishRental') return withQuery('publicar-aluguer.html');
   if(name==='verify') return 'verificar-conta.html';
   return 'index.html';
 }
@@ -956,7 +969,7 @@ function rerenderCurrentView(){ renderRoute(); }
    é verificada dentro da própria vista de "painel", não aqui (ver
    renderSeller()), porque nesse caso o utilizador já está autenticado e
    só precisa de ativar o modo vendedor, não de voltar a entrar. */
-const PROTECTED_ROUTES = ['publish','seller','buyer'];
+const PROTECTED_ROUTES = ['publish','seller','buyer','publishRental'];
 function isAuthed(){ return !!(state.session && state.session.autenticado); }
 function hasUnlimitedPlan(){ return currentPlanInfo().limite === null; }
 
@@ -992,6 +1005,7 @@ function afterNavigate(){
   }
   if(state.route.name==='detail' && state.route.params.id) registerView(state.route.params.id);
   if((state.route.name==='seller' || state.route.name==='publish') && isAuthed()) loadMyCarsFromAPI();
+  if(state.route.name==='rentals') loadRentalsFromAPI();
   renderRoute();
 }
 
@@ -1110,6 +1124,145 @@ function carCardHtml(v){
 }
 function carCardSkeletonEmpty(msg, sub){
   return `<div class="empty-state" style="grid-column:1/-1;">${icon('search')}<h4>${escapeHtml(msg||'Sem resultados')}</h4><p>${escapeHtml(sub||'Tenta ajustar os filtros de pesquisa.')}</p></div>`;
+}
+
+/* ---------------------------------------------------------------------- */
+/* ALUGUER DE CARROS                                                      */
+/* ---------------------------------------------------------------------- */
+function rentalCardHtml(r){
+  return `
+  <article class="car-card" data-id="${r.id}">
+    <div class="car-card-media">
+      ${mediaPlaceholder(r.id, r.fotos[0])}
+      <span class="photo-count">${icon('camera')} ${r.fotos.length}</span>
+    </div>
+    <div class="car-card-body">
+      <h3 class="car-title">${escapeHtml(r.marca)} ${escapeHtml(r.modelo)}</h3>
+      <div class="car-loc">${icon('mapPin')}${escapeHtml(r.cidade||r.provincia||'Angola')}</div>
+      <div class="car-chips">
+        <span class="chip chip-mono">${r.ano}</span>
+        ${r.cambio?`<span class="chip chip-mono">${escapeHtml(r.cambio)}</span>`:''}
+        ${r.combustivel?`<span class="chip chip-mono">${escapeHtml(r.combustivel)}</span>`:''}
+        ${r.lugares?`<span class="chip chip-mono">${r.lugares} lugares</span>`:''}
+      </div>
+      <div class="car-price-row">
+        <div class="car-price">${formatKz(r.precoDia)}<small style="font-size:11px;font-weight:600;color:var(--text-faint);"> /dia</small></div>
+        <button type="button" class="btn btn-secondary btn-sm" data-action="open-rental-contact" data-id="${r.id}">${icon('phone')} Contactar</button>
+      </div>
+    </div>
+  </article>`;
+}
+function renderRentalsPage(){
+  const aprovados = state.rentals.filter(r=> r.status==='approved');
+  const provFiltro = state.route.params.provincia || '';
+  const filtrados = provFiltro ? aprovados.filter(r=> r.provincia===provFiltro) : aprovados;
+  return `<div class="container section">
+    <div class="page-head"><h1 class="page-title">Alugar um carro</h1><p class="page-sub">Aluguer diário diretamente com o proprietário, em todo o país.</p></div>
+    <form id="rental-filter-form" class="search-bar" style="margin:18px 0;">
+      <select name="provincia"><option value="">Todas as províncias</option>${selectOptions(PROVINCES, provFiltro)}</select>
+      <button type="submit" class="btn btn-primary">${icon('search')} Filtrar</button>
+      <a href="${hashFor('publishRental',{})}" class="btn btn-secondary">${icon('plus')} Publicar o meu carro</a>
+    </form>
+    <div class="car-grid">
+      ${filtrados.length ? filtrados.map(rentalCardHtml).join('') : carCardSkeletonEmpty('Ainda sem carros para alugar', provFiltro?'Tenta outra província ou vê todas.':'Sê o primeiro a publicar um carro para aluguer.')}
+    </div>
+  </div>`;
+}
+function bindRentalsPageEvents(){
+  qs('#rental-filter-form')?.addEventListener('submit', (e)=>{
+    e.preventDefault();
+    navigate('rentals', cleanParams({ provincia: new FormData(e.target).get('provincia') }));
+  });
+}
+function openRentalContactModal(id){
+  const r = state.rentals.find(x=>x.id===id); if(!r) return;
+  openModal(`
+    <div class="modal-head"><h3>${icon('key')} ${escapeHtml(r.marca)} ${escapeHtml(r.modelo)}</h3><button class="modal-close" data-action="close-modal">${icon('x')}</button></div>
+    <div class="modal-body">
+      <div class="seller-top">
+        <div class="seller-avatar">${initials(r.proprietario.nome)}</div>
+        <div><div class="seller-name-row"><span class="seller-name">${escapeHtml(r.proprietario.nome)}</span></div><div class="seller-meta">${r.proprietario.provincia?escapeHtml(r.proprietario.provincia):'Angola'}</div></div>
+      </div>
+      <div class="finance-result" style="margin:16px 0;"><div class="fr-amount">${formatKz(r.precoDia)}</div><div class="fr-label">por dia</div></div>
+      ${r.proprietario.telefone?`
+      <div class="seller-actions-row2">
+        <a class="btn btn-primary" href="tel:${escapeHtml(r.proprietario.telefone.replace(/\s+/g,''))}">${icon('phone')} Ligar</a>
+        <a class="btn btn-secondary" href="https://wa.me/${escapeHtml(r.proprietario.telefone.replace(/\D/g,''))}" target="_blank" rel="noopener">${icon('message')} WhatsApp</a>
+      </div>` : `<p style="font-size:13px;color:var(--text-faint);">Este proprietário ainda não tem telefone associado à conta.</p>`}
+      <div class="safety-box" style="margin-top:16px;"><h4>${icon('shieldAlert')}Antes de combinares o aluguer</h4><ul>
+        <li>Confirma documentos (carta de condução, seguro) antes de levantar o carro</li>
+        <li>Regista o estado do carro (fotos) na entrega e na devolução</li>
+      </ul></div>
+    </div>`);
+}
+function renderPublishRentalPage(){
+  return `<div class="container section-tight">
+    <div class="page-head"><h1 class="page-title">Publicar carro para aluguer</h1><p class="page-sub">Preenche os dados — fica disponível de imediato em "Alugar".</p></div>
+    <form id="publish-rental-form" class="form-card" novalidate>
+      <div class="form-grid-2">
+        <div class="field"><label>Marca</label><input type="text" name="brand" required placeholder="Ex: Toyota"></div>
+        <div class="field"><label>Modelo</label><input type="text" name="model" required placeholder="Ex: Corolla"></div>
+      </div>
+      <div class="form-grid-2">
+        <div class="field"><label>Ano</label><input type="number" name="year" required min="1980" max="2027"></div>
+        <div class="field"><label>Preço por dia (Kz)</label><input type="number" name="price_per_day" required min="1000" step="500"></div>
+      </div>
+      <div class="form-grid-2">
+        <div class="field"><label>Câmbio</label><select name="transmission"><option value="">—</option><option>Manual</option><option>Automática</option></select></div>
+        <div class="field"><label>Combustível</label><select name="fuel"><option value="">—</option><option>Gasolina</option><option>Gasóleo</option><option>Híbrido</option><option>Elétrico</option></select></div>
+      </div>
+      <div class="form-grid-2">
+        <div class="field"><label>Lugares</label><input type="number" name="seats" min="1" max="9" placeholder="Ex: 5"></div>
+        <div class="field"><label>Província</label><select name="province" required><option value="">Seleciona</option>${selectOptions(PROVINCES)}</select></div>
+      </div>
+      <div class="field"><label>Cidade / zona de levantamento</label><input type="text" name="location" placeholder="Ex: Talatona, Luanda"></div>
+      <div class="field"><label>Descrição</label><textarea name="description" rows="4" placeholder="Condições do aluguer, quilometragem incluída, depósito, etc."></textarea></div>
+      <div class="field-error" id="publish-rental-error" style="display:none;"></div>
+      <button type="submit" class="btn btn-primary btn-block">${icon('key')} Publicar aluguer</button>
+    </form>
+  </div>`;
+}
+function bindPublishRentalEvents(){
+  qs('#publish-rental-form')?.addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const err = qs('#publish-rental-error');
+    err.style.display = 'none';
+
+    const body = {
+      brand: fd.get('brand'), model: fd.get('model'),
+      year: Number(fd.get('year')), price_per_day: Number(fd.get('price_per_day')),
+      transmission: fd.get('transmission'), fuel: fd.get('fuel'),
+      seats: fd.get('seats') ? Number(fd.get('seats')) : null,
+      province: fd.get('province'), location: fd.get('location'),
+      description: fd.get('description')
+    };
+    if(!body.brand || !body.model || !body.year || !body.price_per_day || !body.province){
+      err.textContent = 'Preenche marca, modelo, ano, preço por dia e província.';
+      err.style.display = 'block';
+      return;
+    }
+    try{
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${API_URL}/rentals`, {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${token}` },
+        body: JSON.stringify(body)
+      });
+      const data = await response.json().catch(()=>({}));
+      if(!response.ok){
+        err.textContent = data.error || 'Não foi possível publicar o aluguer.';
+        err.style.display = 'block';
+        return;
+      }
+      showToast('Aluguer publicado com sucesso!');
+      navigate('rentals', {});
+    }catch(error){
+      console.error('Erro ao publicar aluguer:', error);
+      err.textContent = 'Não foi possível ligar ao servidor. Tenta novamente.';
+      err.style.display = 'block';
+    }
+  });
 }
 
 /* ---------------------------------------------------------------------- */
@@ -1521,7 +1674,7 @@ function renderDetail(id){
           <div class="seller-avatar">${initials(v.vendedor.nome)}</div>
           <div>
             <div class="seller-name-row"><span class="seller-name">${escapeHtml(v.vendedor.nome)}</span>${v.vendedor.verificado?`<span class="badge badge-verified">${icon('badgeCheck')}Verificado</span>`:''}</div>
-            <div class="seller-meta">${icon(v.vendedor.tipo==='stand'?'building':'user')} ${v.vendedor.tipo==='stand'?'Stand / Concessionária':'Vendedor particular'} · Desde ${v.vendedor.membroDesde}</div>
+            <div class="seller-meta">${icon(v.vendedor.tipo==='stand'?'building':'user')} ${v.vendedor.tipo==='stand'?'Stand / Concessionária':'Vendedor particular'}${v.vendedor.provincia?` · ${escapeHtml(v.vendedor.provincia)}`:''} · Desde ${v.vendedor.membroDesde}</div>
             <div class="seller-stars">${Array.from({length:5}).map((_,i)=> i < Math.round(ratingSummary.media) ? icon('starFilled') : icon('star')).join('')}<span class="seller-stars-num">${ratingSummary.media.toFixed(1)}${ratingSummary.total?` (${ratingSummary.total})`:''}</span></div>
           </div>
         </a>
@@ -1618,7 +1771,7 @@ function openContactModal(v){
     <div class="modal-body">
       <a class="seller-top" href="${hashFor('vendorProfile',{id:v.vendedor.id})}" style="text-decoration:none;color:inherit;">
         <div class="seller-avatar">${initials(v.vendedor.nome)}</div>
-        <div><div class="seller-name-row"><span class="seller-name">${escapeHtml(v.vendedor.nome)}</span>${v.vendedor.verificado?`<span class="badge badge-verified">${icon('checkCircle')}Verificado</span>`:''}</div><div class="seller-meta">${v.vendedor.tipo==='stand'?'Stand':'Particular'} · Membro desde ${v.vendedor.membroDesde}</div></div>
+        <div><div class="seller-name-row"><span class="seller-name">${escapeHtml(v.vendedor.nome)}</span>${v.vendedor.verificado?`<span class="badge badge-verified">${icon('checkCircle')}Verificado</span>`:''}</div><div class="seller-meta">${v.vendedor.tipo==='stand'?'Stand':'Particular'}${v.vendedor.provincia?` · ${escapeHtml(v.vendedor.provincia)}`:''} · Membro desde ${v.vendedor.membroDesde}</div></div>
       </a>
       ${contactoHtml}
       <div class="safety-box" style="margin-top:16px;"><h4>${icon('shieldAlert')}Antes de negociar</h4><ul>
@@ -2505,6 +2658,8 @@ const ROUTE_TITLES = {
   signup: 'Criar Conta — AutoMercado Angola',
   forgot: 'Recuperar Password — AutoMercado Angola',
   resetPassword: 'Nova Palavra-passe — AutoMercado Angola',
+  rentals: 'Alugar Carros — AutoMercado Angola',
+  publishRental: 'Publicar Aluguer — AutoMercado Angola',
   verify: 'Verificar Conta — AutoMercado Angola'
 };
 function renderRoute(){
@@ -2521,6 +2676,8 @@ function renderRoute(){
   else if(name==='signup'){ root.innerHTML = renderAuthPage('signup'); bindAuthPageEvents('signup'); }
   else if(name==='forgot'){ root.innerHTML = renderAuthPage('forgot'); bindAuthPageEvents('forgot'); }
   else if(name==='resetPassword'){ root.innerHTML = renderResetPasswordPage(); bindResetPasswordEvents(); }
+  else if(name==='rentals'){ root.innerHTML = renderRentalsPage(); bindRentalsPageEvents(); }
+  else if(name==='publishRental'){ root.innerHTML = renderPublishRentalPage(); bindPublishRentalEvents(); }
   else if(name==='verify'){ root.innerHTML = renderAuthPage('verify'); bindAuthPageEvents('verify'); }
   else { root.innerHTML = renderHome(); bindHomeEvents(); }
   if(name==='detail'){
@@ -2549,6 +2706,7 @@ function globalClickHandler(e){
     case 'close-modal': closeModal(); break;
     case 'toggle-fav': if(id) requireAuth(()=> toggleFavorite(id)); break;
     case 'open-contact': { const v=findVehicle(id); if(v) requireAuth(()=> openContactModal(v)); break; }
+    case 'open-rental-contact': requireAuth(()=> openRentalContactModal(id)); break;
     case 'open-message': { const v=findVehicle(id); if(v) requireAuth(()=> openMessageModal(v)); break; }
     case 'open-report': { const v=findVehicle(id); if(v) openReportModal(v); break; }
     case 'open-rate-seller': { const v=findVehicle(id); if(v) requireAuth(()=> openRateSellerModal(v)); break; }
@@ -2590,6 +2748,30 @@ function bindGlobalUIEvents(){
   if(headerForm) headerForm.addEventListener('submit', (e)=>{ e.preventDefault(); navigate('search', cleanParams({ q: new FormData(headerForm).get('q') })); });
   const mobileForm = qs('#mobile-search-form');
   if(mobileForm) mobileForm.addEventListener('submit', (e)=>{ e.preventDefault(); navigate('search', cleanParams({ q: new FormData(mobileForm).get('q') })); });
+
+  qs('#theme-toggle-btn')?.addEventListener('click', ()=> setTheme(currentTheme()==='dark' ? 'light' : 'dark'));
+  qsa('[data-theme-choice]').forEach(btn=> btn.addEventListener('click', ()=> setTheme(btn.getAttribute('data-theme-choice'))));
+  updateThemeSwitchUI();
+}
+
+/* ---------------------------------------------------------------------- */
+/* TEMA CLARO/ESCURO                                                      */
+/* Aplicado o mais cedo possível em cada página (ver bloco inline no        */
+/* <head> de cada .html) para não haver um "flash" do tema errado — aqui    */
+/* só tratamos de alternar, guardar a escolha e atualizar os controlos.    */
+/* ---------------------------------------------------------------------- */
+function currentTheme(){
+  return document.documentElement.getAttribute('data-theme')
+    || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+}
+function setTheme(theme){
+  document.documentElement.setAttribute('data-theme', theme);
+  try { localStorage.setItem('theme', theme); } catch(e){}
+  updateThemeSwitchUI();
+}
+function updateThemeSwitchUI(){
+  const theme = currentTheme();
+  qsa('[data-theme-choice]').forEach(btn=> btn.classList.toggle('is-active', btn.getAttribute('data-theme-choice')===theme));
 }
 
 /* ---------------------------------------------------------------------- */
@@ -2676,9 +2858,37 @@ function convertApiCar(car) {
       nome: car.seller_name || "Vendedor",
       tipo: "particular",
       telefone: car.seller_phone || "",
+      provincia: car.seller_province || "",
       verificado: !!(state.session && car.user_id === state.session.id && isVerifiedPlan(state.session.plan)),
       membroDesde: car.created_at ? new Date(car.created_at).getFullYear() : "",
       avaliacao: 4.5
+    }
+  };
+}
+function convertApiRental(rental){
+  const imagens = Array.isArray(rental.images) && rental.images.length
+    ? rental.images.map(img=> img.image_url)
+    : (rental.image_url ? [rental.image_url] : []);
+  return {
+    id: rental.id,
+    marca: rental.brand || "",
+    modelo: rental.model || "",
+    ano: Number(rental.year) || 0,
+    precoDia: Number(rental.price_per_day) || 0,
+    cidade: rental.location || "",
+    provincia: rental.province || "",
+    cambio: rental.transmission || "",
+    combustivel: rental.fuel || "",
+    lugares: rental.seats || "",
+    descricao: rental.description || "",
+    fotos: imagens,
+    status: rental.status || "approved",
+    criadoEm: rental.created_at,
+    proprietario: {
+      id: rental.user_id,
+      nome: rental.owner_name || "Proprietário",
+      telefone: rental.owner_phone || "",
+      provincia: rental.owner_province || ""
     }
   };
 }
@@ -2747,6 +2957,42 @@ async function loadCarsFromAPI() {
     );
 
     return [];
+  }
+}
+
+async function loadRentals(){
+  try{
+    const response = await fetch(`${API_URL}/rentals`);
+    const data = await response.json().catch(()=>({}));
+    if(!response.ok) return [];
+    return Array.isArray(data.rentals) ? data.rentals : [];
+  }catch(error){
+    console.error('Erro ao carregar alugueres:', error);
+    return [];
+  }
+}
+async function loadMyRentals(){
+  const token = localStorage.getItem('token');
+  if(!token) return [];
+  try{
+    const response = await fetch(`${API_URL}/rentals/my/rentals`, { headers:{'Authorization':`Bearer ${token}`} });
+    const data = await response.json().catch(()=>({}));
+    if(!response.ok) return [];
+    return (data.rentals || []).map(convertApiRental);
+  }catch(error){
+    console.error('Erro ao carregar os meus alugueres:', error);
+    return [];
+  }
+}
+async function loadRentalsFromAPI(){
+  try{
+    const rentals = await loadRentals();
+    state.rentals = rentals.map(convertApiRental);
+    rerenderCurrentView();
+    return state.rentals;
+  }catch(error){
+    console.error('ERRO loadRentalsFromAPI:', error);
+    return state.rentals;
   }
 }
 
