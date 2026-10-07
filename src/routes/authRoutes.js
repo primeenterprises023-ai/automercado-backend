@@ -13,7 +13,7 @@ const router = express.Router();
 
 router.post("/register", async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, email, password, province } = req.body;
 
     if (!name || !email || !password) {
       return res.status(400).json({
@@ -29,7 +29,8 @@ router.post("/register", async (req, res) => {
         {
           name,
           email,
-          password: hashedPassword
+          password: hashedPassword,
+          province
         }
       ])
       .select();
@@ -45,7 +46,8 @@ router.post("/register", async (req, res) => {
       user: {
         id: data[0].id,
         name: data[0].name,
-        email: data[0].email
+        email: data[0].email,
+        province: data[0].province
       }
     });
 
@@ -113,7 +115,9 @@ router.post("/login", async (req, res) => {
       user: {
         id: user.id,
         name: user.name,
-        email: user.email
+        email: user.email,
+        phone: user.phone,
+        province: user.province
       }
     });
 
@@ -136,7 +140,7 @@ router.get("/me", authMiddleware, async (req, res) => {
 
     const { data: user, error } = await supabase
       .from("users")
-      .select("id, name, email, created_at")
+      .select("id, name, email, province, created_at")
       .eq("id", req.user.id)
       .single();
 
@@ -166,7 +170,7 @@ router.get("/me", authMiddleware, async (req, res) => {
 
 router.put("/profile", authMiddleware, async (req, res) => {
   try {
-    const { name } = req.body;
+    const { name, province } = req.body;
 
     if (!name) {
       return res.status(400).json({
@@ -176,7 +180,7 @@ router.put("/profile", authMiddleware, async (req, res) => {
 
     const { data, error } = await supabase
       .from("users")
-      .update({ name })
+      .update({ name, province })
       .eq("id", req.user.id)
       .select()
       .single();

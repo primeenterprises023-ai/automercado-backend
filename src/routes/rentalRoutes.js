@@ -7,8 +7,8 @@ const router = express.Router();
 
 
 // ==========================================
-// PUBLICAR CARRO
-// POST /api/cars
+// PUBLICAR ALUGUER
+// POST /api/rentals
 // ==========================================
 
 router.post("/", authMiddleware, async (req, res) => {
@@ -17,52 +17,38 @@ router.post("/", authMiddleware, async (req, res) => {
       brand,
       model,
       year,
-      price,
-      mileage,
+      price_per_day,
       location,
-      description,
-      image_url,
-      fuel,
-      transmission,
-      engine_size,
-      body_type,
-      color,
-      doors,
-      usage_type,
-      condition,
       province,
-      equipment
+      transmission,
+      fuel,
+      seats,
+      description,
+      image_url
     } = req.body;
 
-    if (!brand || !model || !year || !price) {
+    if (!brand || !model || !year || !price_per_day) {
       return res.status(400).json({
-        error: "Marca, modelo, ano e preço são obrigatórios"
+        error: "Marca, modelo, ano e preço por dia são obrigatórios"
       });
     }
 
     const { data, error } = await supabase
-      .from("cars")
+      .from("rentals")
       .insert([
         {
           user_id: req.user.id,
           brand,
           model,
           year,
-          price,
-          mileage,
+          price_per_day,
           location,
+          province,
+          transmission,
+          fuel,
+          seats,
           description,
           image_url,
-          fuel,
-          transmission,
-          engine_size,
-          body_type,
-          color,
-          doors,
-          usage_type,
-          condition,
-          province,
-          equipment,
           status: "approved"
         }
       ])
@@ -78,8 +64,8 @@ router.post("/", authMiddleware, async (req, res) => {
     }
 
     res.status(201).json({
-      message: "Carro publicado com sucesso!",
-      car: data
+      message: "Aluguer publicado com sucesso!",
+      rental: data
     });
 
   } catch (error) {
@@ -93,36 +79,36 @@ router.post("/", authMiddleware, async (req, res) => {
 
 
 // ==========================================
-// LISTAR CARROS APROVADOS
-// GET /api/cars
+// LISTAR ALUGUERES APROVADOS
+// GET /api/rentals
 // ==========================================
 router.get("/", async (req, res) => {
   try {
-    const { data: cars, error: carsError } = await supabase
-      .from("cars")
+    const { data: rentals, error: rentalsError } = await supabase
+      .from("rentals")
       .select("*")
       .eq("status", "approved")
       .order("created_at", { ascending: false });
 
-    if (carsError) {
-      console.error("Erro ao buscar carros:", carsError);
+    if (rentalsError) {
+      console.error("Erro ao buscar alugueres:", rentalsError);
       return res.status(400).json({
-        error: carsError.message
+        error: rentalsError.message
       });
     }
 
-    if (!cars || cars.length === 0) {
+    if (!rentals || rentals.length === 0) {
       return res.json({
-        cars: []
+        rentals: []
       });
     }
 
-    const carIds = cars.map(car => car.id);
+    const rentalIds = rentals.map(rental => rental.id);
 
     const { data: images, error: imagesError } = await supabase
-      .from("car_images")
+      .from("rental_images")
       .select("*")
-      .in("car_id", carIds)
+      .in("rental_id", rentalIds)
       .order("created_at", { ascending: true });
 
     if (imagesError) {
@@ -133,47 +119,47 @@ router.get("/", async (req, res) => {
       });
     }
 
-    const imagesByCar = {};
+    const imagesByRental = {};
 
     for (const image of images || []) {
-      if (!imagesByCar[image.car_id]) {
-        imagesByCar[image.car_id] = [];
+      if (!imagesByRental[image.rental_id]) {
+        imagesByRental[image.rental_id] = [];
       }
 
-      imagesByCar[image.car_id].push(image);
+      imagesByRental[image.rental_id].push(image);
     }
 
-    const sellerIds = [...new Set(cars.map(car => car.user_id))];
+    const ownerIds = [...new Set(rentals.map(rental => rental.user_id))];
 
-    const { data: sellers, error: sellersError } = await supabase
+    const { data: owners, error: ownersError } = await supabase
       .from("users")
       .select("id, name, phone, province")
-      .in("id", sellerIds);
+      .in("id", ownerIds);
 
-    if (sellersError) {
-      console.error("Erro ao buscar vendedores:", sellersError);
+    if (ownersError) {
+      console.error("Erro ao buscar proprietários:", ownersError);
     }
 
-    const sellerById = {};
+    const ownerById = {};
 
-    for (const seller of sellers || []) {
-      sellerById[seller.id] = seller;
+    for (const owner of owners || []) {
+      ownerById[owner.id] = owner;
     }
 
-    const carsWithImages = cars.map(car => {
-      const seller = sellerById[car.user_id];
+    const rentalsWithImages = rentals.map(rental => {
+      const owner = ownerById[rental.user_id];
 
       return {
-        ...car,
-        images: imagesByCar[car.id] || [],
-        seller_name: seller ? seller.name : null,
-        seller_phone: seller ? seller.phone : null,
-        seller_province: seller ? seller.province : null
+        ...rental,
+        images: imagesByRental[rental.id] || [],
+        owner_name: owner ? owner.name : null,
+        owner_phone: owner ? owner.phone : null,
+        owner_province: owner ? owner.province : null
       };
     });
 
     res.json({
-      cars: carsWithImages
+      rentals: rentalsWithImages
     });
 
   } catch (error) {
@@ -187,19 +173,17 @@ router.get("/", async (req, res) => {
 
 
 // ==========================================
-// MEUS CARROS
-// GET /api/cars/my/cars
+// MEUS ALUGUERES
+// GET /api/rentals/my/rentals
 // ==========================================
 
-router.get("/my/cars", authMiddleware, async (req, res) => {
+router.get("/my/rentals", authMiddleware, async (req, res) => {
   try {
     const { data, error } = await supabase
-      .from("cars")
+      .from("rentals")
       .select("*")
       .eq("user_id", req.user.id)
-      .order("created_at", {
-        ascending: false
-      });
+      .order("created_at", { ascending: false });
 
     if (error) {
       console.log("ERRO SUPABASE:", error);
@@ -210,7 +194,7 @@ router.get("/my/cars", authMiddleware, async (req, res) => {
     }
 
     res.json({
-      cars: data
+      rentals: data
     });
 
   } catch (error) {
@@ -224,53 +208,50 @@ router.get("/my/cars", authMiddleware, async (req, res) => {
 
 
 // ==========================================
-// BUSCAR UM CARRO
-// GET /api/cars/:id
+// BUSCAR UM ALUGUER
+// GET /api/rentals/:id
 // ==========================================
 
 router.get("/:id", async (req, res) => {
   try {
-
-    const { data: car, error: carError } = await supabase
-      .from("cars")
+    const { data: rental, error: rentalError } = await supabase
+      .from("rentals")
       .select("*")
       .eq("id", req.params.id)
       .single();
 
-    if (carError || !car) {
+    if (rentalError || !rental) {
       return res.status(404).json({
-        error: "Carro não encontrado"
+        error: "Aluguer não encontrado"
       });
     }
 
     const { data: images, error: imagesError } = await supabase
-      .from("car_images")
+      .from("rental_images")
       .select("*")
-      .eq("car_id", req.params.id)
-      .order("created_at", {
-        ascending: true
-      });
+      .eq("rental_id", req.params.id)
+      .order("created_at", { ascending: true });
 
     if (imagesError) {
       console.log("ERRO AO BUSCAR IMAGENS:", imagesError);
     }
 
-    const { data: seller, error: sellerError } = await supabase
+    const { data: owner, error: ownerError } = await supabase
       .from("users")
       .select("name, phone, province")
-      .eq("id", car.user_id)
+      .eq("id", rental.user_id)
       .single();
 
-    if (sellerError) {
-      console.log("ERRO AO BUSCAR VENDEDOR:", sellerError);
+    if (ownerError) {
+      console.log("ERRO AO BUSCAR PROPRIETÁRIO:", ownerError);
     }
 
     res.json({
-      car: {
-        ...car,
-        seller_name: seller ? seller.name : null,
-        seller_phone: seller ? seller.phone : null,
-        seller_province: seller ? seller.province : null
+      rental: {
+        ...rental,
+        owner_name: owner ? owner.name : null,
+        owner_phone: owner ? owner.phone : null,
+        owner_province: owner ? owner.province : null
       },
       images: images || []
     });
@@ -286,28 +267,27 @@ router.get("/:id", async (req, res) => {
 
 
 // ==========================================
-// EDITAR CARRO
-// PUT /api/cars/:id
+// EDITAR ALUGUER
+// PUT /api/rentals/:id
 // ==========================================
 
 router.put("/:id", authMiddleware, async (req, res) => {
   try {
-
-    const { data: car, error: carError } = await supabase
-      .from("cars")
+    const { data: rental, error: rentalError } = await supabase
+      .from("rentals")
       .select("*")
       .eq("id", req.params.id)
       .single();
 
-    if (carError || !car) {
+    if (rentalError || !rental) {
       return res.status(404).json({
-        error: "Carro não encontrado"
+        error: "Aluguer não encontrado"
       });
     }
 
-    if (car.user_id !== req.user.id) {
+    if (rental.user_id !== req.user.id) {
       return res.status(403).json({
-        error: "Não tens permissão para editar este carro"
+        error: "Não tens permissão para editar este aluguer"
       });
     }
 
@@ -315,42 +295,28 @@ router.put("/:id", authMiddleware, async (req, res) => {
       brand,
       model,
       year,
-      price,
-      mileage,
+      price_per_day,
       location,
-      description,
-      fuel,
-      transmission,
-      engine_size,
-      body_type,
-      color,
-      doors,
-      usage_type,
-      condition,
       province,
-      equipment
+      transmission,
+      fuel,
+      seats,
+      description
     } = req.body;
 
     const { data, error } = await supabase
-      .from("cars")
+      .from("rentals")
       .update({
         brand,
         model,
         year,
-        price,
-        mileage,
+        price_per_day,
         location,
-        description,
-        fuel,
-        transmission,
-        engine_size,
-        body_type,
-        color,
-        doors,
-        usage_type,
-        condition,
         province,
-        equipment,
+        transmission,
+        fuel,
+        seats,
+        description,
         status: "pending"
       })
       .eq("id", req.params.id)
@@ -366,8 +332,8 @@ router.put("/:id", authMiddleware, async (req, res) => {
     }
 
     res.json({
-      message: "Carro atualizado com sucesso",
-      car: data
+      message: "Aluguer atualizado com sucesso",
+      rental: data
     });
 
   } catch (error) {
@@ -381,14 +347,14 @@ router.put("/:id", authMiddleware, async (req, res) => {
 
 
 // ==========================================
-// MUDAR ESTADO (pausar / reativar / vendido)
-// PATCH /api/cars/:id/status
+// MUDAR ESTADO (pausar / reativar / alugado)
+// PATCH /api/rentals/:id/status
 // ==========================================
 
 router.patch("/:id/status", authMiddleware, async (req, res) => {
   try {
     const { status } = req.body;
-    const allowed = ["paused", "approved", "sold"];
+    const allowed = ["paused", "approved", "rented"];
 
     if (!allowed.includes(status)) {
       return res.status(400).json({
@@ -396,26 +362,26 @@ router.patch("/:id/status", authMiddleware, async (req, res) => {
       });
     }
 
-    const { data: car, error: carError } = await supabase
-      .from("cars")
+    const { data: rental, error: rentalError } = await supabase
+      .from("rentals")
       .select("*")
       .eq("id", req.params.id)
       .single();
 
-    if (carError || !car) {
+    if (rentalError || !rental) {
       return res.status(404).json({
-        error: "Carro não encontrado"
+        error: "Aluguer não encontrado"
       });
     }
 
-    if (car.user_id !== req.user.id) {
+    if (rental.user_id !== req.user.id) {
       return res.status(403).json({
-        error: "Não tens permissão para alterar este carro"
+        error: "Não tens permissão para alterar este aluguer"
       });
     }
 
     const { data, error } = await supabase
-      .from("cars")
+      .from("rentals")
       .update({ status })
       .eq("id", req.params.id)
       .select()
@@ -431,7 +397,7 @@ router.patch("/:id/status", authMiddleware, async (req, res) => {
 
     res.json({
       message: "Estado atualizado com sucesso",
-      car: data
+      rental: data
     });
 
   } catch (error) {
@@ -445,33 +411,32 @@ router.patch("/:id/status", authMiddleware, async (req, res) => {
 
 
 // ==========================================
-// APAGAR CARRO
-// DELETE /api/cars/:id
+// APAGAR ALUGUER
+// DELETE /api/rentals/:id
 // ==========================================
 
 router.delete("/:id", authMiddleware, async (req, res) => {
   try {
-
-    const { data: car, error: carError } = await supabase
-      .from("cars")
+    const { data: rental, error: rentalError } = await supabase
+      .from("rentals")
       .select("*")
       .eq("id", req.params.id)
       .single();
 
-    if (carError || !car) {
+    if (rentalError || !rental) {
       return res.status(404).json({
-        error: "Carro não encontrado"
+        error: "Aluguer não encontrado"
       });
     }
 
-    if (car.user_id !== req.user.id) {
+    if (rental.user_id !== req.user.id) {
       return res.status(403).json({
-        error: "Não tens permissão para apagar este carro"
+        error: "Não tens permissão para apagar este aluguer"
       });
     }
 
     const { error } = await supabase
-      .from("cars")
+      .from("rentals")
       .delete()
       .eq("id", req.params.id);
 
@@ -484,7 +449,7 @@ router.delete("/:id", authMiddleware, async (req, res) => {
     }
 
     res.json({
-      message: "Carro apagado com sucesso"
+      message: "Aluguer apagado com sucesso"
     });
 
   } catch (error) {
@@ -499,44 +464,33 @@ router.delete("/:id", authMiddleware, async (req, res) => {
 
 // ==========================================
 // UPLOAD DE FOTOS
-// POST /api/cars/:id/images
+// POST /api/rentals/:id/images
 // ==========================================
 router.post(
   "/:id/images",
   authMiddleware,
   upload.array("images", 10),
   async (req, res) => {
-
     try {
-
-      console.log("========== UPLOAD ==========");
-      console.log("CAR ID:", req.params.id);
-      console.log("USER ID:", req.user.id);
-      console.log("FILES:", req.files?.length);
-
       if (!req.files || req.files.length === 0) {
         return res.status(400).json({
           error: "Nenhuma imagem enviada"
         });
       }
 
-      // Procurar carro
-      const { data: car, error: carError } = await supabase
-        .from("cars")
+      const { data: rental, error: rentalError } = await supabase
+        .from("rentals")
         .select("*")
         .eq("id", req.params.id)
         .single();
 
-      if (carError || !car) {
-        console.log("CAR ERROR:", carError);
-
+      if (rentalError || !rental) {
         return res.status(404).json({
-          error: "Carro não encontrado"
+          error: "Aluguer não encontrado"
         });
       }
 
-      // Verificar proprietário
-      if (car.user_id !== req.user.id) {
+      if (rental.user_id !== req.user.id) {
         return res.status(403).json({
           error: "Não tens permissão"
         });
@@ -544,94 +498,46 @@ router.post(
 
       const uploadedImages = [];
 
-      // Enviar cada imagem
       for (const file of req.files) {
+        const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
+        const fileName = `${req.user.id}/${req.params.id}/${Date.now()}-${safeName}`;
 
-        console.log("ENVIANDO:", file.originalname);
-
-        const safeName = file.originalname
-          .replace(/[^a-zA-Z0-9._-]/g, "_");
-
-        const fileName =
-          `${req.user.id}/${req.params.id}/${Date.now()}-${safeName}`;
-
-        // Upload para Storage
-        const { data: uploadData, error: uploadError } =
-          await supabase
-            .storage
-            .from("Car-images")
-            .upload(
-              fileName,
-              file.buffer,
-              {
-                contentType: file.mimetype,
-                upsert: false
-              }
-            );
+        const { error: uploadError } = await supabase
+          .storage
+          .from("Car-images")
+          .upload(fileName, file.buffer, {
+            contentType: file.mimetype,
+            upsert: false
+          });
 
         if (uploadError) {
-
-          console.log(
-            "ERRO STORAGE:",
-            uploadError
-          );
-
+          console.log("ERRO STORAGE:", uploadError);
           continue;
         }
 
-        console.log(
-          "UPLOAD OK:",
-          uploadData
-        );
+        const { data: publicUrlData } = supabase
+          .storage
+          .from("Car-images")
+          .getPublicUrl(fileName);
 
-        // URL pública
-        const { data: publicUrlData } =
-          supabase
-            .storage
-            .from("Car-images")
-            .getPublicUrl(fileName);
+        const imageUrl = publicUrlData.publicUrl;
 
-        const imageUrl =
-          publicUrlData.publicUrl;
-
-        console.log(
-          "IMAGE URL:",
-          imageUrl
-        );
-
-        // Guardar imagem no banco
-        const { data: imageData, error: imageError } =
-          await supabase
-            .from("car_images")
-            .insert({
-              car_id: req.params.id,
-              image_url: imageUrl
-            })
-            .select()
-            .single();
+        const { data: imageData, error: imageError } = await supabase
+          .from("rental_images")
+          .insert({
+            rental_id: req.params.id,
+            image_url: imageUrl
+          })
+          .select()
+          .single();
 
         if (imageError) {
-
-          console.log(
-            "ERRO CAR_IMAGES:",
-            imageError
-          );
-
+          console.log("ERRO RENTAL_IMAGES:", imageError);
           continue;
         }
-
-        console.log(
-          "BANCO OK:",
-          imageData
-        );
 
         uploadedImages.push(imageData);
       }
-
-      console.log(
-        "TOTAL UPLOAD:",
-        uploadedImages.length
-      );
 
       res.json({
         message: "Fotos enviadas com sucesso",
@@ -639,11 +545,7 @@ router.post(
       });
 
     } catch (error) {
-
-      console.log(
-        "ERRO GERAL UPLOAD:",
-        error
-      );
+      console.log("ERRO GERAL UPLOAD:", error);
 
       res.status(500).json({
         error: "Erro ao enviar imagens"
@@ -651,12 +553,5 @@ router.post(
     }
   }
 );
-// ==========================================
-// EXPORTAR ROTAS
-// ==========================================
-router.get("/test/upload", (req, res) => {
-  res.json({
-    message: "Rota de upload está funcionando"
-  });
-});
+
 module.exports = router;
