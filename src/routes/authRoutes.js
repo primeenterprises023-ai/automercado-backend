@@ -31,10 +31,10 @@ router.post("/register", async (req, res) => {
           email,
           password: hashedPassword,
           province
-          plan: user.plan
         }
       ])
-.select("id, name, email, province, plan, created_at")
+      .select();
+
     if (error) {
       return res.status(400).json({
         error: error.message
