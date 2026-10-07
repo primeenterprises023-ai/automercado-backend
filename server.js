@@ -6,6 +6,7 @@ const rateLimit = require("express-rate-limit");
 const authRoutes = require("./src/routes/authRoutes");
 const carRoutes = require("./src/routes/carRoutes");
 const productRoutes = require("./src/routes/productRoutes");
+const rentalRoutes = require("./src/routes/rentalRoutes");
 
 const app = express();
 
@@ -16,7 +17,7 @@ const app = express();
 
 app.use(cors({
   origin: true,
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"]
 }));
 
@@ -56,6 +57,8 @@ app.use("/api/auth", authRoutes);
 app.use("/api/cars", carRoutes);
 
 app.use("/api/products", productRoutes);
+
+app.use("/api/rentals", rentalRoutes);
 
 
 // ================================
