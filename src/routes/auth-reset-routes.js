@@ -1,150 +1,185 @@
-/**
- * Rotas de recuperação de palavra-passe.
- *
- * ⚠️ ASSUME (ajusta se for diferente no teu projeto):
- *   - Tabela "users" com colunas: id (uuid), email, password (hash bcrypt), name
- *   - Já tens `bcryptjs` instalado (usas para o /auth/register e /auth/login)
- *
- * PRECISA DE UM CLIENTE SUPABASE COM A SERVICE ROLE KEY — NÃO a anon key.
- * A tabela password_reset_tokens não tem políticas de RLS para
- * anon/authenticated de propósito (ver o ficheiro .sql), por isso só um
- * cliente com a service role consegue ler/escrever nela. Cria esse cliente
- * separado do que já usas no resto da app (que provavelmente usa a anon key):
- *
- *   const { createClient } = require('@supabase/supabase-js');
- *   const supabaseAdmin = createClient(
- *     process.env.SUPABASE_URL,
- *     process.env.SUPABASE_SERVICE_ROLE_KEY  // Project Settings → API
- *   );
- *
- * COMO MONTAR ISTO no teu server.js / app.js:
- *
- *   const authResetRoutes = require('./auth-reset-routes')(supabaseAdmin);
- *   app.use('/api/auth', authResetRoutes);
- *
- * Isto cria POST /api/auth/forgot-password e POST /api/auth/reset-password
- * ao lado das rotas /api/auth/login e /api/auth/register que já tens.
- */
-const express = require('express');
-const crypto = require('crypto');
-const bcrypt = require('bcryptjs');
-const { sendPasswordResetEmail } = require('./mailer');
+const express = require("express");
+const crypto = require("crypto");
+const bcrypt = require("bcryptjs");
+const { sendPasswordResetEmail } = require("./mailer");
 
-const TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hora
-const GENERIC_MESSAGE = 'Se esse email tiver conta, vais receber um link para definires uma nova palavra-passe.';
+const TOKEN_TTL_MS = 60 * 60 * 1000;
 
 module.exports = function (supabaseAdmin) {
   const router = express.Router();
 
-  // POST /forgot-password   body: { email }
-  // Responde sempre com a MESMA mensagem, exista ou não o email — é assim
-  // que se evita que alguém descubra quais emails têm conta, só por tentativa.
-  router.post('/forgot-password', async (req, res) => {
-    const respondGeneric = () => res.json({ message: GENERIC_MESSAGE });
-
+  router.post("/forgot-password", async (req, res) => {
     try {
-      const email = String(req.body.email || '').trim().toLowerCase();
-      if (!email) return res.status(400).json({ error: 'Email é obrigatório.' });
+      const email = String(req.body.email || "").trim().toLowerCase();
 
-      const { data: user, error: userErr } = await supabaseAdmin
-        .from('users')
-        .select('id, email, name')
-        .eq('email', email)
+      if (!email) {
+        return res.status(400).json({
+          error: "Email é obrigatório."
+        });
+      }
+
+      const { data: user, error: userError } = await supabaseAdmin
+        .from("users")
+        .select("id, email, name")
+        .eq("email", email)
         .maybeSingle();
 
-      if (userErr) {
-        console.error('forgot-password: erro a procurar utilizador', userErr);
-        return respondGeneric();
+      if (userError || !user) {
+        return res.json({
+          message:
+            "Se esse email tiver conta, vais receber um link para definires uma nova palavra-passe."
+        });
       }
-      if (!user) return respondGeneric(); // email não existe — mesma resposta
 
-      // Invalida pedidos anteriores ainda por usar, para não acumular
-      // vários links válidos ao mesmo tempo para a mesma conta.
+      const rawToken = crypto.randomBytes(32).toString("hex");
+
+      const tokenHash = crypto
+        .createHash("sha256")
+        .update(rawToken)
+        .digest("hex");
+
+      const expiresAt = new Date(
+        Date.now() + TOKEN_TTL_MS
+      ).toISOString();
+
       await supabaseAdmin
-        .from('password_reset_tokens')
-        .update({ used_at: new Date().toISOString() })
-        .eq('user_id', user.id)
-        .is('used_at', null);
+        .from("password_reset_tokens")
+        .update({
+          used_at: new Date().toISOString()
+        })
+        .eq("user_id", user.id)
+        .is("used_at", null);
 
-      // O token "em bruto" só existe neste momento e vai no link do email —
-      // na base de dados só fica o hash dele, nunca o valor original
-      // (o mesmo princípio de nunca guardar a password em texto simples).
-      const rawToken = crypto.randomBytes(32).toString('hex');
-      const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
-      const expiresAt = new Date(Date.now() + TOKEN_TTL_MS).toISOString();
+      const { error: insertError } = await supabaseAdmin
+        .from("password_reset_tokens")
+        .insert({
+          user_id: user.id,
+          token_hash: tokenHash,
+          expires_at: expiresAt
+        });
 
-      const { error: insertErr } = await supabaseAdmin
-        .from('password_reset_tokens')
-        .insert({ user_id: user.id, token_hash: tokenHash, expires_at: expiresAt });
+      if (insertError) {
+        console.error("Erro ao criar token:", insertError);
 
-      if (insertErr) {
-        console.error('forgot-password: erro a gravar token', insertErr);
-        return respondGeneric();
+        return res.status(500).json({
+          error: "Não foi possível criar o link."
+        });
       }
 
-      const resetLink = `${process.env.FRONTEND_URL}/redefinir-password.html?token=${rawToken}`;
-      try {
-        await sendPasswordResetEmail({ to: user.email, name: user.name, resetLink });
-      } catch (mailErr) {
-        // Mesmo se o envio do email falhar (SMTP em baixo, etc.), a resposta
-        // ao cliente mantém-se genérica — não revelamos detalhes de infra.
-        console.error('forgot-password: erro a enviar email', mailErr);
-      }
+      const frontendUrl =
+        process.env.FRONTEND_URL ||
+        "https://automercado-site-2.vercel.app";
 
-      return respondGeneric();
-    } catch (err) {
-      console.error('forgot-password: erro inesperado', err);
-      return respondGeneric();
+      const resetLink =
+        `${frontendUrl}/redefinir-password.html?token=${encodeURIComponent(rawToken)}`;
+
+      await sendPasswordResetEmail({
+        to: user.email,
+        name: user.name,
+        resetLink
+      });
+
+      return res.json({
+        message:
+          "Se esse email tiver conta, vais receber um link para definires uma nova palavra-passe."
+      });
+    } catch (error) {
+      console.error("Erro forgot-password:", error);
+
+      return res.status(500).json({
+        error: "Erro interno."
+      });
     }
   });
 
-  // POST /reset-password   body: { token, newPassword }
-  router.post('/reset-password', async (req, res) => {
+  router.post("/reset-password", async (req, res) => {
     try {
-      const { token, newPassword } = req.body;
+      const token = String(req.body.token || "").trim();
+      const newPassword = String(req.body.newPassword || "");
+
       if (!token || !newPassword) {
-        return res.status(400).json({ error: 'Pedido inválido.' });
-      }
-      if (String(newPassword).length < 6) {
-        return res.status(400).json({ error: 'A palavra-passe tem de ter pelo menos 6 caracteres.' });
-      }
-
-      const tokenHash = crypto.createHash('sha256').update(String(token)).digest('hex');
-
-      const { data: tokenRow, error: tokenErr } = await supabaseAdmin
-        .from('password_reset_tokens')
-        .select('id, user_id, expires_at, used_at')
-        .eq('token_hash', tokenHash)
-        .maybeSingle();
-
-      const isExpired = tokenRow && new Date(tokenRow.expires_at) < new Date();
-      if (tokenErr || !tokenRow || tokenRow.used_at || isExpired) {
-        return res.status(400).json({ error: 'Link inválido ou expirado. Pede um novo.' });
+        return res.status(400).json({
+          error: "Pedido inválido."
+        });
       }
 
-      const passwordHash = await bcrypt.hash(String(newPassword), 10);
-
-      const { error: updateErr } = await supabaseAdmin
-        .from('users')
-        .update({ password: passwordHash })
-        .eq('id', tokenRow.user_id);
-
-      if (updateErr) {
-        console.error('reset-password: erro a atualizar password', updateErr);
-        return res.status(500).json({ error: 'Não foi possível atualizar a palavra-passe. Tenta novamente.' });
+      if (newPassword.length < 6) {
+        return res.status(400).json({
+          error: "A palavra-passe deve ter pelo menos 6 caracteres."
+        });
       }
 
-      // Marca o token como usado — nunca mais pode ser reaproveitado,
-      // mesmo que alguém o tenha visto (ex.: num proxy de email).
+      const tokenHash = crypto
+        .createHash("sha256")
+        .update(token)
+        .digest("hex");
+
+      const { data: tokenRow, error: tokenError } =
+        await supabaseAdmin
+          .from("password_reset_tokens")
+          .select("id, user_id, expires_at, used_at")
+          .eq("token_hash", tokenHash)
+          .maybeSingle();
+
+      if (tokenError) {
+        console.error("Erro ao procurar token:", tokenError);
+
+        return res.status(500).json({
+          error: "Erro ao validar o link."
+        });
+      }
+
+      if (!tokenRow) {
+        return res.status(400).json({
+          error: "Link inválido ou expirado. Pede um novo."
+        });
+      }
+
+      if (tokenRow.used_at) {
+        return res.status(400).json({
+          error: "Este link já foi utilizado. Pede um novo."
+        });
+      }
+
+      if (new Date(tokenRow.expires_at) < new Date()) {
+        return res.status(400).json({
+          error: "Link expirado. Pede um novo."
+        });
+      }
+
+      const passwordHash = await bcrypt.hash(newPassword, 10);
+
+      const { error: updateError } = await supabaseAdmin
+        .from("users")
+        .update({
+          password: passwordHash
+        })
+        .eq("id", tokenRow.user_id);
+
+      if (updateError) {
+        console.error("Erro ao atualizar password:", updateError);
+
+        return res.status(500).json({
+          error: "Não foi possível atualizar a palavra-passe."
+        });
+      }
+
       await supabaseAdmin
-        .from('password_reset_tokens')
-        .update({ used_at: new Date().toISOString() })
-        .eq('id', tokenRow.id);
+        .from("password_reset_tokens")
+        .update({
+          used_at: new Date().toISOString()
+        })
+        .eq("id", tokenRow.id);
 
-      return res.json({ message: 'Palavra-passe atualizada com sucesso.' });
-    } catch (err) {
-      console.error('reset-password: erro inesperado', err);
-      return res.status(500).json({ error: 'Erro interno. Tenta novamente.' });
+      return res.json({
+        message: "Palavra-passe atualizada com sucesso."
+      });
+    } catch (error) {
+      console.error("Erro reset-password:", error);
+
+      return res.status(500).json({
+        error: "Erro interno."
+      });
     }
   });
 
