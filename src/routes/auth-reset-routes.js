@@ -73,24 +73,21 @@ module.exports = function (supabaseAdmin) {
       const resetLink =
         `${frontendUrl}/redefinir-password.html?token=${encodeURIComponent(rawToken)}`;
 
-      await sendPasswordResetEmail({
-        to: user.email,
-        name: user.name,
-        resetLink
-      });
-
-      return res.json({
-        message:
-          "Se esse email tiver conta, vais receber um link para definires uma nova palavra-passe."
-      });
-    } catch (error) {
-      console.error("Erro forgot-password:", error);
-
-      return res.status(500).json({
-        error: "Erro interno."
-      });
-    }
+try {
+  await sendPasswordResetEmail({
+    to: user.email,
+    name: user.name,
+    resetLink
   });
+
+  console.log("EMAIL DE RECUPERAÇÃO ENVIADO PARA:", user.email);
+} catch (emailError) {
+  console.error("ERRO AO ENVIAR EMAIL:", emailError);
+
+  return res.status(500).json({
+    error: "Não foi possível enviar o email de recuperação."
+  });
+}
 
   router.post("/reset-password", async (req, res) => {
     try {
