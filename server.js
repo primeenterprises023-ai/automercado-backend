@@ -1,14 +1,9 @@
-require("dotenv").config();
-
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 
 const authRoutes = require("./src/routes/authRoutes");
-const authResetRoutes = require("./src/routes/auth-reset-routes");
-const supabaseAdmin = require("./src/config/supabaseAdmin");
-
 const carRoutes = require("./src/routes/carRoutes");
 const productRoutes = require("./src/routes/productRoutes");
 const rentalRoutes = require("./src/routes/rentalRoutes");
@@ -58,8 +53,6 @@ app.use(express.static("public"));
 // ================================
 
 app.use("/api/auth", authRoutes);
-
-app.use("/api/auth", authResetRoutes(supabaseAdmin));
 
 app.use("/api/cars", carRoutes);
 
