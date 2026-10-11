@@ -1102,6 +1102,7 @@ function carCardHtml(v){
     <a class="car-card-media" href="${hashFor('detail',{id:v.id})}" aria-label="Ver anúncio ${escapeHtml(v.marca+' '+v.modelo)}">
       ${mediaPlaceholder(v.id, v.fotos[0])}
       <div class="car-badge-row">
+        ${v.destaque?`<span class="badge badge-featured">${icon('zap')}Destaque</span>`:''}
       </div>
       <span class="photo-count">${icon('camera')} ${v.fotos.length}</span>
     </a>
@@ -1176,9 +1177,11 @@ function bindRentalsPageEvents(){
 }
 function openRentalContactModal(id){
   const r = state.rentals.find(x=>x.id===id); if(!r) return;
+  fetch(`${API_URL}/rentals/${id}/contact`, { method:'POST' }).catch(()=>{});
   openModal(`
     <div class="modal-head"><h3>${icon('key')} ${escapeHtml(r.marca)} ${escapeHtml(r.modelo)}</h3><button class="modal-close" data-action="close-modal">${icon('x')}</button></div>
     <div class="modal-body">
+      ${r.fotos[0]?`<img src="${escapeHtml(r.fotos[0])}" alt="${escapeHtml(r.marca)} ${escapeHtml(r.modelo)}" style="width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:var(--radius-md);margin-bottom:14px;">`:''}
       <div class="seller-top">
         <div class="seller-avatar">${initials(r.proprietario.nome)}</div>
         <div><div class="seller-name-row"><span class="seller-name">${escapeHtml(r.proprietario.nome)}</span></div><div class="seller-meta">${r.proprietario.provincia?escapeHtml(r.proprietario.provincia):'Angola'}</div></div>
@@ -1195,10 +1198,32 @@ function openRentalContactModal(id){
       </ul></div>
     </div>`);
 }
+let publishRentalFiles = [];
+function renderRentalImagePreviewGrid(){
+  return publishRentalFiles.map((f,i)=>`<div class="image-preview"><img src="${f.url}" alt="Foto ${i+1}">${i===0?'<span class="cover-tag">Capa</span>':''}<button type="button" class="image-remove-btn" data-action="remove-rental-photo" data-idx="${i}">${icon('x')}</button></div>`).join('');
+}
+function handleRentalFiles(fileList){
+  let added = 0;
+  for(const file of fileList){
+    if(publishRentalFiles.length>=10){ showToast('Máximo de 10 fotos', {error:true}); break; }
+    if(!file.type.startsWith('image/')){ continue; }
+    if(file.size > 5*1024*1024){ showToast(`"${file.name}" excede 5MB`, {error:true}); continue; }
+    publishRentalFiles.push({ file, url:URL.createObjectURL(file) }); added++;
+  }
+  if(added) refreshRentalImagePreviewGrid();
+}
+function removeRentalPhoto(idx){ const f=publishRentalFiles[idx]; if(f){ try{URL.revokeObjectURL(f.url);}catch(e){} } publishRentalFiles.splice(idx,1); refreshRentalImagePreviewGrid(); }
+function refreshRentalImagePreviewGrid(){ const grid = qs('#rental-image-preview-grid'); if(grid) grid.innerHTML = renderRentalImagePreviewGrid(); }
+
 function renderPublishRentalPage(){
+  publishRentalFiles = [];
   return `<div class="container section-tight">
     <div class="page-head"><h1 class="page-title">Publicar carro para aluguer</h1><p class="page-sub">Preenche os dados — fica disponível de imediato em "Alugar".</p></div>
     <form id="publish-rental-form" class="form-card" novalidate>
+      <div class="form-section-title">${icon('camera')} Fotos do veículo</div>
+      <div class="dropzone" id="rental-dropzone">${icon('upload')}<p>Arrasta as fotos para aqui ou clica para escolher</p><span>JPG, PNG ou WEBP • até 5MB cada • máx. 10 fotos</span><input type="file" id="rental-file-input" accept="image/*" multiple style="display:none;"></div>
+      <div class="image-preview-grid" id="rental-image-preview-grid"></div>
+
       <div class="form-grid-2">
         <div class="field"><label>Marca</label><input type="text" name="brand" required placeholder="Ex: Toyota"></div>
         <div class="field"><label>Modelo</label><input type="text" name="model" required placeholder="Ex: Corolla"></div>
@@ -1218,15 +1243,31 @@ function renderPublishRentalPage(){
       <div class="field"><label>Cidade / zona de levantamento</label><input type="text" name="location" placeholder="Ex: Talatona, Luanda"></div>
       <div class="field"><label>Descrição</label><textarea name="description" rows="4" placeholder="Condições do aluguer, quilometragem incluída, depósito, etc."></textarea></div>
       <div class="field-error" id="publish-rental-error" style="display:none;"></div>
-      <button type="submit" class="btn btn-primary btn-block">${icon('key')} Publicar aluguer</button>
+      <button type="submit" class="btn btn-primary btn-block" id="publish-rental-btn">${icon('key')} Publicar aluguer</button>
     </form>
   </div>`;
 }
 function bindPublishRentalEvents(){
-  qs('#publish-rental-form')?.addEventListener('submit', async (e)=>{
+  const form = qs('#publish-rental-form');
+  if(!form) return;
+
+  const dropzone = qs('#rental-dropzone');
+  const fileInput = qs('#rental-file-input');
+  dropzone?.addEventListener('click', ()=> fileInput.click());
+  fileInput?.addEventListener('change', ()=> handleRentalFiles(fileInput.files));
+  dropzone?.addEventListener('dragover', (e)=>{ e.preventDefault(); dropzone.classList.add('is-drag'); });
+  dropzone?.addEventListener('dragleave', ()=> dropzone.classList.remove('is-drag'));
+  dropzone?.addEventListener('drop', (e)=>{ e.preventDefault(); dropzone.classList.remove('is-drag'); handleRentalFiles(e.dataTransfer.files); });
+  qs('#rental-image-preview-grid')?.addEventListener('click', (e)=>{
+    const btn = e.target.closest('[data-action="remove-rental-photo"]');
+    if(btn) removeRentalPhoto(Number(btn.getAttribute('data-idx')));
+  });
+
+  form.addEventListener('submit', async (e)=>{
     e.preventDefault();
     const fd = new FormData(e.target);
     const err = qs('#publish-rental-error');
+    const btn = qs('#publish-rental-btn');
     err.style.display = 'none';
 
     const body = {
@@ -1242,6 +1283,14 @@ function bindPublishRentalEvents(){
       err.style.display = 'block';
       return;
     }
+    if(publishRentalFiles.length === 0){
+      err.textContent = 'Adiciona pelo menos uma foto do carro.';
+      err.style.display = 'block';
+      dropzone?.scrollIntoView({ behavior:'smooth', block:'center' });
+      return;
+    }
+
+    btn.disabled = true;
     try{
       const token = localStorage.getItem('token');
       const response = await fetch(`${API_URL}/rentals`, {
@@ -1253,14 +1302,34 @@ function bindPublishRentalEvents(){
       if(!response.ok){
         err.textContent = data.error || 'Não foi possível publicar o aluguer.';
         err.style.display = 'block';
+        btn.disabled = false;
         return;
       }
+
+      const rental = data.rental;
+      const imgFd = new FormData();
+      publishRentalFiles.forEach(item=> imgFd.append('images', item.file));
+      try{
+        const uploadResponse = await fetch(`${API_URL}/rentals/${rental.id}/images`, {
+          method:'POST',
+          headers:{ 'Authorization':`Bearer ${token}` },
+          body: imgFd
+        });
+        if(!uploadResponse.ok) throw new Error('upload falhou');
+      }catch(uploadError){
+        console.error('Erro ao enviar fotos do aluguer:', uploadError);
+        showToast('Aluguer publicado, mas houve um erro a enviar as fotos.', {error:true});
+      }
+
+      publishRentalFiles.forEach(f=>{ try{ URL.revokeObjectURL(f.url); }catch(e){} });
+      publishRentalFiles = [];
       showToast('Aluguer publicado com sucesso!');
       navigate('rentals', {});
     }catch(error){
       console.error('Erro ao publicar aluguer:', error);
       err.textContent = 'Não foi possível ligar ao servidor. Tenta novamente.';
       err.style.display = 'block';
+      btn.disabled = false;
     }
   });
 }
@@ -1754,6 +1823,7 @@ function normalizeAngolaPhone(telefone){
 
 function openContactModal(v){
   v.contactos = (v.contactos||0)+1; saveVehicles();
+  fetch(`${API_URL}/cars/${v.id}/contact`, { method:'POST' }).catch(()=>{});
   notifyIfOwnListing(v.id, 'Novo contacto recebido', `Alguém pediu o contacto do teu anúncio ${v.marca} ${v.modelo}.`);
   const temTelefone = !!(v.vendedor && v.vendedor.telefone && v.vendedor.telefone.trim());
   const waNumber = temTelefone ? normalizeAngolaPhone(v.vendedor.telefone) : '';
@@ -2374,6 +2444,7 @@ function accountFormHtml(){
       <div class="field"><label>Nome completo</label><input type="text" name="nome" value="${escapeHtml(s.nome)}" required></div>
       <div class="field"><label>Email</label><input type="email" value="${escapeHtml(s.email||'')}" disabled></div>
       <div class="field"><label>Telefone</label><input type="text" name="telefone" value="${escapeHtml(s.telefone)}" required></div>
+      <div class="field"><label>Província</label><select name="provincia">${selectOptions(PROVINCES, s.provincia)}</select></div>
       <div class="field"><label>Tipo de conta (para venda)</label><div class="role-select-row">
         <label class="role-option"><input type="radio" name="tipo" value="particular" ${s.tipo!=='stand'?'checked':''}>${icon('user')}<span>Particular</span></label>
         <label class="role-option"><input type="radio" name="tipo" value="stand" ${s.tipo==='stand'?'checked':''}>${icon('building')}<span>Stand</span></label>
@@ -2401,6 +2472,7 @@ function bindAccountForm(){
 
     const nome = (fd.get('nome') || '').trim();
     const telefone = (fd.get('telefone') || '').trim();
+    const provincia = (fd.get('provincia') || '').trim();
 
     // Grava nome e telefone no servidor (tabela users) — é o mesmo
     // telefone que os compradores passam a usar para contactar esta
@@ -2416,7 +2488,7 @@ function bindAccountForm(){
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${token}`
           },
-          body: JSON.stringify({ name: nome, phone: telefone })
+          body: JSON.stringify({ name: nome, phone: telefone, province: provincia })
         });
 
         const data = await response.json().catch(()=>({}));
@@ -2432,9 +2504,26 @@ function bindAccountForm(){
       }
     }
 
-    state.session = Object.assign({}, state.session, { nome, telefone, tipo:fd.get('tipo'), papeis });
+    state.session = Object.assign({}, state.session, { nome, telefone, provincia, tipo:fd.get('tipo'), papeis });
     saveSession(); showToast('Dados atualizados'); rerenderCurrentView();
   });
+}
+
+// Número de WhatsApp do suporte prioritário — substitui pelo número real
+// de apoio da equipa AutoMercado antes de publicares.
+const SUPORTE_PRIORITARIO_WHATSAPP = '+244900000000';
+function supportCardHtml(){
+  const prioritario = isVerifiedPlan((state.session&&state.session.plan)||'free');
+  return `<div class="form-card" style="max-width:480px;margin-top:16px;">
+    <h3 style="margin:0 0 4px;font-size:15px;">${icon('headphones')} Suporte</h3>
+    ${prioritario ? `
+      <p style="font-size:13px;color:var(--text-dim);margin:0 0 12px;">O teu plano inclui suporte prioritário — respondemos primeiro aos teus pedidos.</p>
+      <a class="btn btn-primary btn-block" href="https://wa.me/${SUPORTE_PRIORITARIO_WHATSAPP.replace(/\D/g,'')}" target="_blank" rel="noopener">${icon('message')} Falar com o suporte prioritário</a>
+    ` : `
+      <p style="font-size:13px;color:var(--text-dim);margin:0 0 12px;">Tens acesso ao suporte normal. Planos pagos têm uma linha prioritária, com resposta mais rápida.</p>
+      <a class="btn btn-secondary btn-block" href="${hashFor('plans',{})}">${icon('zap')} Ver planos com suporte prioritário</a>
+    `}
+  </div>`;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -2444,8 +2533,6 @@ function sellerStatItems(){
   const mine = mySellerListings();
   return [
     { label:'Anúncios ativos', value: mine.filter(v=>v.status==='ativo').length },
-    { label:'Visualizações totais', value: formatNum(mine.reduce((s,v)=>s+(v.visualizacoes||0),0)) },
-    { label:'Contactos recebidos', value: formatNum(mine.reduce((s,v)=>s+(v.contactos||0),0)) },
     { label:'Carros vendidos', value: mine.filter(v=>v.status==='vendido').length },
   ];
 }
@@ -2486,13 +2573,26 @@ function renderSeller(){
     const msgs = myMessages().slice().sort((a,b)=> new Date(b.criadoEm)-new Date(a.criadoEm));
     panel = `<div class="dash-panel-head"><h2>Mensagens recebidas</h2></div>${msgs.length?msgs.map(messageItemHtml).join(''):emptyStateHtml('bell','Sem mensagens ainda','As mensagens de compradores interessados vão aparecer aqui.')}`;
   } else if(tab==='estatisticas'){
-    const top = mine.slice().sort((a,b)=>(b.visualizacoes||0)-(a.visualizacoes||0)).slice(0,6);
-    const maxV = Math.max(1, ...top.map(v=>v.visualizacoes||0));
-    panel = `<div class="dash-panel-head"><h2>Estatísticas</h2></div>
-      <div class="stat-strip">${sellerStatItems().map(s=>`<div class="stat-item"><div class="stat-value">${s.value}</div><div class="stat-label">${s.label}</div></div>`).join('')}</div>
-      <div class="admin-panel"><h3>${icon('barChart')}Visualizações por anúncio</h3>${top.length?`<div class="bar-chart">${top.map(v=>`<div class="bar-row"><span class="bar-name">${escapeHtml(v.marca+' '+v.modelo)}</span><div class="bar-track"><div class="bar-fill" style="width:${Math.max(4,(v.visualizacoes||0)/maxV*100)}%;"></div></div><span class="bar-val">${formatNum(v.visualizacoes||0)}</span></div>`).join('')}</div>`:'<p style="font-size:13px;color:var(--text-dim);">Publica um anúncio para veres estatísticas.</p>'}</div>`;
+    const planInfo = currentPlanInfo();
+    const temAcesso = ['pro','stand','concessionaria','empresarial'].includes((state.session&&state.session.plan)||'free');
+    if(!temAcesso){
+      panel = `<div class="dash-panel-head"><h2>Estatísticas</h2></div>
+        <div class="empty-state" style="padding:36px 20px;">${icon('barChart')}<h4>Disponível a partir do plano Pro</h4><p>Vê quantas pessoas visualizam e contactam cada um dos teus anúncios — inclui gráfico por anúncio e contactos recebidos.</p><a class="btn btn-primary" href="${hashFor('plans',{})}" style="margin-top:12px;">${icon('arrowRight')} Ver planos</a></div>`;
+    } else {
+      const totalViews = mine.reduce((s,v)=>s+(v.visualizacoes||0),0);
+      const totalContactos = mine.reduce((s,v)=>s+(v.contactos||0),0);
+      const top = mine.slice().sort((a,b)=>(b.visualizacoes||0)-(a.visualizacoes||0)).slice(0,6);
+      const maxV = Math.max(1, ...top.map(v=>v.visualizacoes||0));
+      panel = `<div class="dash-panel-head"><h2>Estatísticas</h2><span class="badge badge-verified">${icon('badgeCheck')}Plano ${escapeHtml(planInfo.nome)}</span></div>
+        <div class="stat-strip">
+          <div class="stat-item"><div class="stat-value">${formatNum(totalViews)}</div><div class="stat-label">Visualizações totais</div></div>
+          <div class="stat-item"><div class="stat-value">${formatNum(totalContactos)}</div><div class="stat-label">Contactos recebidos</div></div>
+          <div class="stat-item"><div class="stat-value">${mine.filter(v=>v.status==='ativo').length}</div><div class="stat-label">Anúncios ativos</div></div>
+        </div>
+        <div class="admin-panel"><h3>${icon('barChart')}Visualizações por anúncio</h3>${top.length?`<div class="bar-chart">${top.map(v=>`<div class="bar-row"><span class="bar-name">${escapeHtml(v.marca+' '+v.modelo)}</span><div class="bar-track"><div class="bar-fill" style="width:${Math.max(4,(v.visualizacoes||0)/maxV*100)}%;"></div></div><span class="bar-val">${formatNum(v.visualizacoes||0)}</span></div>`).join('')}</div>`:'<p style="font-size:13px;color:var(--text-dim);">Publica um anúncio para veres estatísticas.</p>'}</div>`;
+    }
   } else if(tab==='dados'){
-    panel = `<div class="dash-panel-head"><h2>Dados da conta</h2></div>${accountFormHtml()}`;
+    panel = `<div class="dash-panel-head"><h2>Dados da conta</h2></div>${accountFormHtml()}${supportCardHtml()}`;
   } else {
     panel = `<div class="dash-panel-head"><h2>Meus anúncios</h2><a class="btn btn-primary btn-sm" href="${hashFor('publish',{})}">${icon('plus')} Novo anúncio</a></div>
       <div class="stat-strip">${sellerStatItems().map(s=>`<div class="stat-item"><div class="stat-value">${s.value}</div><div class="stat-label">${s.label}</div></div>`).join('')}</div>
@@ -2845,21 +2945,18 @@ function convertApiCar(car) {
 
     criadoEm: car.created_at,
 
-    // A API atual só devolve o user_id do vendedor, sem perfil completo,
-    // por isso o nome continua com um valor neutro. O telefone já vem
-    // preenchido (seller_phone), obtido pelo backend a partir da conta do
-    // vendedor — é o que os botões de Ligar/WhatsApp na ficha do carro usam.
-    // "verificado" só pode ser calculado com confiança para os carros do
-    // próprio utilizador autenticado (sabemos o plano dele em state.session).
-    // Para anúncios de outros vendedores isto fica false até a API de
-    // listagem passar também a devolver o plano/selo de cada vendedor.
+    visualizacoes: Number(car.views) || 0,
+    contactos: Number(car.contacts) || 0,
+    destaque: isVerifiedPlan(car.seller_plan) ,
+
     vendedor: {
       id: car.user_id,
       nome: car.seller_name || "Vendedor",
       tipo: "particular",
       telefone: car.seller_phone || "",
       provincia: car.seller_province || "",
-      verificado: !!(state.session && car.user_id === state.session.id && isVerifiedPlan(state.session.plan)),
+      plan: car.seller_plan || "free",
+      verificado: isVerifiedPlan(car.seller_plan),
       membroDesde: car.created_at ? new Date(car.created_at).getFullYear() : "",
       avaliacao: 4.5
     }
@@ -2884,6 +2981,8 @@ function convertApiRental(rental){
     fotos: imagens,
     status: rental.status || "approved",
     criadoEm: rental.created_at,
+    visualizacoes: Number(rental.views) || 0,
+    contactos: Number(rental.contacts) || 0,
     proprietario: {
       id: rental.user_id,
       nome: rental.owner_name || "Proprietário",
