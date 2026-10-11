@@ -30,11 +30,11 @@ router.post("/register", async (req, res) => {
           name,
           email,
           password: hashedPassword,
-          province,
-          plan: user.plan
+          province
         }
       ])
-.select("id, name, email, province, plan, created_at")
+      .select();
+
     if (error) {
       return res.status(400).json({
         error: error.message
@@ -170,7 +170,7 @@ router.get("/me", authMiddleware, async (req, res) => {
 
 router.put("/profile", authMiddleware, async (req, res) => {
   try {
-    const { name, province } = req.body;
+    const { name, phone, province } = req.body;
 
     if (!name) {
       return res.status(400).json({
@@ -180,7 +180,7 @@ router.put("/profile", authMiddleware, async (req, res) => {
 
     const { data, error } = await supabase
       .from("users")
-      .update({ name, province })
+      .update({ name, phone, province })
       .eq("id", req.user.id)
       .select()
       .single();

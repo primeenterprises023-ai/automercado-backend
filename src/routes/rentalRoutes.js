@@ -246,6 +246,12 @@ router.get("/:id", async (req, res) => {
       console.log("ERRO AO BUSCAR PROPRIETÁRIO:", ownerError);
     }
 
+    supabase
+      .from("rentals")
+      .update({ views: (rental.views || 0) + 1 })
+      .eq("id", rental.id)
+      .then(() => {}, (err) => console.log("ERRO AO CONTAR VISUALIZAÇÃO:", err));
+
     res.json({
       rental: {
         ...rental,
@@ -255,6 +261,42 @@ router.get("/:id", async (req, res) => {
       },
       images: images || []
     });
+
+  } catch (error) {
+    console.log("ERRO INTERNO:", error);
+
+    res.status(500).json({
+      error: "Erro interno do servidor"
+    });
+  }
+});
+
+
+// ==========================================
+// CONTAR CONTACTO (estatísticas para planos pagos)
+// POST /api/rentals/:id/contact
+// ==========================================
+
+router.post("/:id/contact", async (req, res) => {
+  try {
+    const { data: rental, error: rentalError } = await supabase
+      .from("rentals")
+      .select("contacts")
+      .eq("id", req.params.id)
+      .single();
+
+    if (rentalError || !rental) {
+      return res.status(404).json({
+        error: "Aluguer não encontrado"
+      });
+    }
+
+    await supabase
+      .from("rentals")
+      .update({ contacts: (rental.contacts || 0) + 1 })
+      .eq("id", req.params.id);
+
+    res.json({ message: "Contacto registado" });
 
   } catch (error) {
     console.log("ERRO INTERNO:", error);

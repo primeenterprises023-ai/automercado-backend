@@ -147,7 +147,7 @@ router.get("/", async (req, res) => {
 
     const { data: sellers, error: sellersError } = await supabase
       .from("users")
-      .select("id, name, phone, province")
+      .select("id, name, phone, province, plan")
       .in("id", sellerIds);
 
     if (sellersError) {
@@ -160,17 +160,24 @@ router.get("/", async (req, res) => {
       sellerById[seller.id] = seller;
     }
 
-    const carsWithImages = cars.map(car => {
-      const seller = sellerById[car.user_id];
+    const PLAN_RANK = { free: 0, individual: 1, pro: 2, stand: 2, concessionaria: 3, empresarial: 4 };
 
-      return {
-        ...car,
-        images: imagesByCar[car.id] || [],
-        seller_name: seller ? seller.name : null,
-        seller_phone: seller ? seller.phone : null,
-        seller_province: seller ? seller.province : null
-      };
-    });
+    const carsWithImages = cars
+      .map(car => {
+        const seller = sellerById[car.user_id];
+
+        return {
+          ...car,
+          images: imagesByCar[car.id] || [],
+          seller_name: seller ? seller.name : null,
+          seller_phone: seller ? seller.phone : null,
+          seller_province: seller ? seller.province : null,
+          seller_plan: seller ? seller.plan : "free"
+        };
+      })
+      // Planos pagos (individual e acima) sobem nos resultados — é o
+      // benefício de "anúncios em destaque" anunciado nos planos.
+      .sort((a, b) => (PLAN_RANK[b.seller_plan] || 0) - (PLAN_RANK[a.seller_plan] || 0));
 
     res.json({
       cars: carsWithImages
@@ -257,7 +264,7 @@ router.get("/:id", async (req, res) => {
 
     const { data: seller, error: sellerError } = await supabase
       .from("users")
-      .select("name, phone, province")
+      .select("name, phone, province, plan")
       .eq("id", car.user_id)
       .single();
 
@@ -265,12 +272,20 @@ router.get("/:id", async (req, res) => {
       console.log("ERRO AO BUSCAR VENDEDOR:", sellerError);
     }
 
+    // Conta visualização (não bloqueia a resposta se isto falhar).
+    supabase
+      .from("cars")
+      .update({ views: (car.views || 0) + 1 })
+      .eq("id", car.id)
+      .then(() => {}, (err) => console.log("ERRO AO CONTAR VISUALIZAÇÃO:", err));
+
     res.json({
       car: {
         ...car,
         seller_name: seller ? seller.name : null,
         seller_phone: seller ? seller.phone : null,
-        seller_province: seller ? seller.province : null
+        seller_province: seller ? seller.province : null,
+        seller_plan: seller ? seller.plan : "free"
       },
       images: images || []
     });
@@ -433,6 +448,42 @@ router.patch("/:id/status", authMiddleware, async (req, res) => {
       message: "Estado atualizado com sucesso",
       car: data
     });
+
+  } catch (error) {
+    console.log("ERRO INTERNO:", error);
+
+    res.status(500).json({
+      error: "Erro interno do servidor"
+    });
+  }
+});
+
+
+// ==========================================
+// CONTAR CONTACTO (estatísticas para planos pagos)
+// POST /api/cars/:id/contact
+// ==========================================
+
+router.post("/:id/contact", async (req, res) => {
+  try {
+    const { data: car, error: carError } = await supabase
+      .from("cars")
+      .select("contacts")
+      .eq("id", req.params.id)
+      .single();
+
+    if (carError || !car) {
+      return res.status(404).json({
+        error: "Carro não encontrado"
+      });
+    }
+
+    await supabase
+      .from("cars")
+      .update({ contacts: (car.contacts || 0) + 1 })
+      .eq("id", req.params.id);
+
+    res.json({ message: "Contacto registado" });
 
   } catch (error) {
     console.log("ERRO INTERNO:", error);
