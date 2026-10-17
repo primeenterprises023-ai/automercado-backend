@@ -1135,6 +1135,9 @@ function rentalCardHtml(r){
   <article class="car-card" data-id="${r.id}">
     <div class="car-card-media">
       ${mediaPlaceholder(r.id, r.fotos[0])}
+      <div class="car-badge-row">
+        ${r.destaque?`<span class="badge badge-featured">${icon('zap')}Destaque</span>`:''}
+      </div>
       <span class="photo-count">${icon('camera')} ${r.fotos.length}</span>
     </div>
     <div class="car-card-body">
@@ -1184,7 +1187,7 @@ function openRentalContactModal(id){
       ${r.fotos[0]?`<img src="${escapeHtml(r.fotos[0])}" alt="${escapeHtml(r.marca)} ${escapeHtml(r.modelo)}" style="width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:var(--radius-md);margin-bottom:14px;">`:''}
       <div class="seller-top">
         <div class="seller-avatar">${initials(r.proprietario.nome)}</div>
-        <div><div class="seller-name-row"><span class="seller-name">${escapeHtml(r.proprietario.nome)}</span></div><div class="seller-meta">${r.proprietario.provincia?escapeHtml(r.proprietario.provincia):'Angola'}</div></div>
+        <div><div class="seller-name-row"><span class="seller-name">${escapeHtml(r.proprietario.nome)}</span>${r.proprietario.verificado?`<span class="badge badge-verified">${icon('checkCircle')}Verificado</span>`:''}</div><div class="seller-meta">${r.proprietario.provincia?escapeHtml(r.proprietario.provincia):'Angola'}</div></div>
       </div>
       <div class="finance-result" style="margin:16px 0;"><div class="fr-amount">${formatKz(r.precoDia)}</div><div class="fr-label">por dia</div></div>
       ${r.proprietario.telefone?`
@@ -1299,6 +1302,11 @@ function bindPublishRentalEvents(){
         body: JSON.stringify(body)
       });
       const data = await response.json().catch(()=>({}));
+      if(response.status === 402){
+        showToast(data.error || 'Atingiste o limite de anúncios do teu plano.', {error:true});
+        navigate('plans', {});
+        return;
+      }
       if(!response.ok){
         err.textContent = data.error || 'Não foi possível publicar o aluguer.';
         err.style.display = 'block';
@@ -2983,11 +2991,13 @@ function convertApiRental(rental){
     criadoEm: rental.created_at,
     visualizacoes: Number(rental.views) || 0,
     contactos: Number(rental.contacts) || 0,
+    destaque: isVerifiedPlan(rental.owner_plan),
     proprietario: {
       id: rental.user_id,
       nome: rental.owner_name || "Proprietário",
       telefone: rental.owner_phone || "",
-      provincia: rental.owner_province || ""
+      provincia: rental.owner_province || "",
+      verificado: isVerifiedPlan(rental.owner_plan)
     }
   };
 }
