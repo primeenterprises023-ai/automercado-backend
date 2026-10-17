@@ -2,6 +2,7 @@ const express = require("express");
 const supabase = require("../config/supabase");
 const authMiddleware = require("../middleware/authMiddleware");
 const upload = require("../middleware/uploadMiddleware");
+const { PLAN_LIMITS, PLAN_RANK } = require("../config/planLimits");
 
 const router = express.Router();
 
@@ -31,6 +32,31 @@ router.post("/", authMiddleware, async (req, res) => {
       return res.status(400).json({
         error: "Marca, modelo, ano e preço por dia são obrigatórios"
       });
+    }
+
+    const { data: me } = await supabase
+      .from("users")
+      .select("plan")
+      .eq("id", req.user.id)
+      .single();
+
+    const plan = (me && me.plan) || "free";
+    const limite = PLAN_LIMITS[plan];
+
+    if (limite !== null && limite !== undefined) {
+      const { count, error: countError } = await supabase
+        .from("rentals")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", req.user.id)
+        .in("status", ["pending", "approved", "paused"]);
+
+      if (countError) {
+        console.log("ERRO AO CONTAR ALUGUERES:", countError);
+      } else if ((count || 0) >= limite) {
+        return res.status(402).json({
+          error: `Atingiste o limite de anúncios do teu plano (${limite}). Faz upgrade para publicares mais.`
+        });
+      }
     }
 
     const { data, error } = await supabase
@@ -133,7 +159,7 @@ router.get("/", async (req, res) => {
 
     const { data: owners, error: ownersError } = await supabase
       .from("users")
-      .select("id, name, phone, province")
+      .select("id, name, phone, province, plan")
       .in("id", ownerIds);
 
     if (ownersError) {
@@ -146,17 +172,21 @@ router.get("/", async (req, res) => {
       ownerById[owner.id] = owner;
     }
 
-    const rentalsWithImages = rentals.map(rental => {
-      const owner = ownerById[rental.user_id];
+    const rentalsWithImages = rentals
+      .map(rental => {
+        const owner = ownerById[rental.user_id];
 
-      return {
-        ...rental,
-        images: imagesByRental[rental.id] || [],
-        owner_name: owner ? owner.name : null,
-        owner_phone: owner ? owner.phone : null,
-        owner_province: owner ? owner.province : null
-      };
-    });
+        return {
+          ...rental,
+          images: imagesByRental[rental.id] || [],
+          owner_name: owner ? owner.name : null,
+          owner_phone: owner ? owner.phone : null,
+          owner_province: owner ? owner.province : null,
+          owner_plan: owner ? owner.plan : "free"
+        };
+      })
+      // Mesmo benefício de destaque que os carros têm, para quem tem plano pago.
+      .sort((a, b) => (PLAN_RANK[b.owner_plan] || 0) - (PLAN_RANK[a.owner_plan] || 0));
 
     res.json({
       rentals: rentalsWithImages
@@ -238,7 +268,7 @@ router.get("/:id", async (req, res) => {
 
     const { data: owner, error: ownerError } = await supabase
       .from("users")
-      .select("name, phone, province")
+      .select("name, phone, province, plan")
       .eq("id", rental.user_id)
       .single();
 
@@ -257,7 +287,8 @@ router.get("/:id", async (req, res) => {
         ...rental,
         owner_name: owner ? owner.name : null,
         owner_phone: owner ? owner.phone : null,
-        owner_province: owner ? owner.province : null
+        owner_province: owner ? owner.province : null,
+        owner_plan: owner ? owner.plan : "free"
       },
       images: images || []
     });
@@ -420,6 +451,31 @@ router.patch("/:id/status", authMiddleware, async (req, res) => {
       return res.status(403).json({
         error: "Não tens permissão para alterar este aluguer"
       });
+    }
+
+    if (status === "approved" && rental.status !== "approved") {
+      const { data: me } = await supabase
+        .from("users")
+        .select("plan")
+        .eq("id", req.user.id)
+        .single();
+
+      const plan = (me && me.plan) || "free";
+      const limite = PLAN_LIMITS[plan];
+
+      if (limite !== null && limite !== undefined) {
+        const { count } = await supabase
+          .from("rentals")
+          .select("id", { count: "exact", head: true })
+          .eq("user_id", req.user.id)
+          .in("status", ["pending", "approved"]);
+
+        if ((count || 0) >= limite) {
+          return res.status(402).json({
+            error: `Atingiste o limite de anúncios do teu plano (${limite}).`
+          });
+        }
+      }
     }
 
     const { data, error } = await supabase

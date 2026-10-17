@@ -2,6 +2,7 @@ const express = require("express");
 const supabase = require("../config/supabase");
 const authMiddleware = require("../middleware/authMiddleware");
 const upload = require("../middleware/uploadMiddleware");
+const { PLAN_LIMITS, PLAN_RANK } = require("../config/planLimits");
 
 const router = express.Router();
 
@@ -38,6 +39,31 @@ router.post("/", authMiddleware, async (req, res) => {
       return res.status(400).json({
         error: "Marca, modelo, ano e preço são obrigatórios"
       });
+    }
+
+    const { data: me } = await supabase
+      .from("users")
+      .select("plan")
+      .eq("id", req.user.id)
+      .single();
+
+    const plan = (me && me.plan) || "free";
+    const limite = PLAN_LIMITS[plan];
+
+    if (limite !== null && limite !== undefined) {
+      const { count, error: countError } = await supabase
+        .from("cars")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", req.user.id)
+        .in("status", ["pending", "approved", "paused"]);
+
+      if (countError) {
+        console.log("ERRO AO CONTAR ANÚNCIOS:", countError);
+      } else if ((count || 0) >= limite) {
+        return res.status(402).json({
+          error: `Atingiste o limite de anúncios do teu plano (${limite}). Faz upgrade para publicares mais.`
+        });
+      }
     }
 
     const { data, error } = await supabase
@@ -159,8 +185,6 @@ router.get("/", async (req, res) => {
     for (const seller of sellers || []) {
       sellerById[seller.id] = seller;
     }
-
-    const PLAN_RANK = { free: 0, individual: 1, pro: 2, stand: 2, concessionaria: 3, empresarial: 4 };
 
     const carsWithImages = cars
       .map(car => {
@@ -427,6 +451,31 @@ router.patch("/:id/status", authMiddleware, async (req, res) => {
       return res.status(403).json({
         error: "Não tens permissão para alterar este carro"
       });
+    }
+
+    if (status === "approved" && car.status !== "approved") {
+      const { data: me } = await supabase
+        .from("users")
+        .select("plan")
+        .eq("id", req.user.id)
+        .single();
+
+      const plan = (me && me.plan) || "free";
+      const limite = PLAN_LIMITS[plan];
+
+      if (limite !== null && limite !== undefined) {
+        const { count } = await supabase
+          .from("cars")
+          .select("id", { count: "exact", head: true })
+          .eq("user_id", req.user.id)
+          .in("status", ["pending", "approved"]);
+
+        if ((count || 0) >= limite) {
+          return res.status(402).json({
+            error: `Atingiste o limite de anúncios do teu plano (${limite}).`
+          });
+        }
+      }
     }
 
     const { data, error } = await supabase
