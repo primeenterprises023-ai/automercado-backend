@@ -8,9 +8,12 @@ const TOKEN_TTL_MS = 60 * 60 * 1000;
 module.exports = function (supabaseAdmin) {
   const router = express.Router();
 
+  // Pedir recuperação de palavra-passe
   router.post("/forgot-password", async (req, res) => {
     try {
-      const email = String(req.body.email || "").trim().toLowerCase();
+      const email = String(req.body.email || "")
+        .trim()
+        .toLowerCase();
 
       if (!email) {
         return res.status(400).json({
@@ -18,13 +21,23 @@ module.exports = function (supabaseAdmin) {
         });
       }
 
-      const { data: user, error: userError } = await supabaseAdmin
-        .from("users")
-        .select("id, email, name")
-        .eq("email", email)
-        .maybeSingle();
+      const { data: user, error: userError } =
+        await supabaseAdmin
+          .from("users")
+          .select("id, email, name")
+          .eq("email", email)
+          .maybeSingle();
 
-      if (userError || !user) {
+      if (userError) {
+        console.error("Erro ao procurar utilizador:", userError);
+
+        return res.status(500).json({
+          error: "Erro ao processar o pedido."
+        });
+      }
+
+      // Resposta genérica para não revelar se o email tem conta
+      if (!user) {
         return res.json({
           message:
             "Se esse email tiver conta, vais receber um link para definires uma nova palavra-passe."
@@ -42,7 +55,8 @@ module.exports = function (supabaseAdmin) {
         Date.now() + TOKEN_TTL_MS
       ).toISOString();
 
-      await supabaseAdmin
+      // Invalidar tokens anteriores ainda não utilizados
+      const { error: invalidateError } = await supabaseAdmin
         .from("password_reset_tokens")
         .update({
           used_at: new Date().toISOString()
@@ -50,6 +64,18 @@ module.exports = function (supabaseAdmin) {
         .eq("user_id", user.id)
         .is("used_at", null);
 
+      if (invalidateError) {
+        console.error(
+          "Erro ao invalidar tokens anteriores:",
+          invalidateError
+        );
+
+        return res.status(500).json({
+          error: "Não foi possível criar o link."
+        });
+      }
+
+      // Guardar o hash do token, nunca o token original
       const { error: insertError } = await supabaseAdmin
         .from("password_reset_tokens")
         .insert({
@@ -66,29 +92,68 @@ module.exports = function (supabaseAdmin) {
         });
       }
 
-      const frontendUrl =
+      const frontendUrl = (
         process.env.FRONTEND_URL ||
-        "https://automercado-site-2.vercel.app";
+        "https://automercado-site-2.vercel.app"
+      ).replace(/\/+$/, "");
 
       const resetLink =
         `${frontendUrl}/redefinir-password.html?token=${encodeURIComponent(rawToken)}`;
 
-try {
-  await sendPasswordResetEmail({
-    to: user.email,
-    name: user.name,
-    resetLink
+      // Enviar email e devolver erro real se o envio falhar
+      try {
+        const result = await sendPasswordResetEmail({
+          to: user.email,
+          name: user.name,
+          resetLink
+        });
+
+        console.log("Email de recuperação aceite pelo SMTP.", {
+          messageId: result && result.messageId,
+          accepted: result && result.accepted
+            ? result.accepted.length
+            : 0,
+          rejected: result && result.rejected
+            ? result.rejected.length
+            : 0
+        });
+      } catch (emailError) {
+        console.error("ERRO AO ENVIAR EMAIL:", emailError);
+
+        // Invalidar o token se o envio falhar
+        const { error: cleanupError } = await supabaseAdmin
+          .from("password_reset_tokens")
+          .update({
+            used_at: new Date().toISOString()
+          })
+          .eq("token_hash", tokenHash);
+
+        if (cleanupError) {
+          console.error(
+            "Erro ao invalidar token após falha de email:",
+            cleanupError
+          );
+        }
+
+        return res.status(500).json({
+          error: "Não foi possível enviar o email de recuperação."
+        });
+      }
+
+      return res.json({
+        message:
+          "Se esse email tiver conta, vais receber um link para definires uma nova palavra-passe."
+      });
+    } catch (error) {
+      console.error("Erro forgot-password:", error);
+
+      return res.status(500).json({
+        error: "Erro interno."
+      });
+    }
   });
 
-  console.log("EMAIL DE RECUPERAÇÃO ENVIADO PARA:", user.email);
-} catch (emailError) {
-  console.error("ERRO AO ENVIAR EMAIL:", emailError);
-
-  return res.status(500).json({
-    error: "Não foi possível enviar o email de recuperação."
-  });
-}
-
+  // Definir nova palavra-passe
   router.post("/reset-password", async (req, res) => {
     try {
       const token = String(req.body.token || "").trim();
@@ -102,7 +167,8 @@ try {
 
       if (newPassword.length < 6) {
         return res.status(400).json({
-          error: "A palavra-passe deve ter pelo menos 6 caracteres."
+          error:
+            "A palavra-passe deve ter pelo menos 6 caracteres."
         });
       }
 
@@ -154,19 +220,34 @@ try {
         .eq("id", tokenRow.user_id);
 
       if (updateError) {
-        console.error("Erro ao atualizar password:", updateError);
+        console.error(
+          "Erro ao atualizar palavra-passe:",
+          updateError
+        );
 
         return res.status(500).json({
           error: "Não foi possível atualizar a palavra-passe."
         });
       }
 
-      await supabaseAdmin
+      const { error: usedError } = await supabaseAdmin
         .from("password_reset_tokens")
         .update({
           used_at: new Date().toISOString()
         })
         .eq("id", tokenRow.id);
+
+      if (usedError) {
+        console.error(
+          "Erro ao marcar token como utilizado:",
+          usedError
+        );
+
+        return res.status(500).json({
+          error:
+            "A palavra-passe foi alterada, mas não foi possível concluir o pedido."
+        });
+      }
 
       return res.json({
         message: "Palavra-passe atualizada com sucesso."
