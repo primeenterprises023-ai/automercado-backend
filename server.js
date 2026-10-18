@@ -4,6 +4,8 @@ const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 
 const authRoutes = require("./src/routes/authRoutes");
+const supabaseAdmin = require("./src/config/supabaseAdmin");
+const createAuthResetRoutes = require("./src/routes/auth-reset-routes");
 const carRoutes = require("./src/routes/carRoutes");
 const productRoutes = require("./src/routes/productRoutes");
 const rentalRoutes = require("./src/routes/rentalRoutes");
@@ -53,6 +55,7 @@ app.use(express.static("public"));
 // ================================
 
 app.use("/api/auth", authRoutes);
+app.use("/api/auth", createAuthResetRoutes(supabaseAdmin));
 
 app.use("/api/cars", carRoutes);
 
