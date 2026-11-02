@@ -219,12 +219,15 @@ svg{ display:block; }
    HEADER
    ========================================================================= */
 .site-header{ position:sticky; top:0; z-index:40; background:rgba(28,36,45,.92); backdrop-filter:blur(10px); border-bottom:1px solid var(--line-dark); }
-.header-inner{ display:flex; align-items:center; gap:18px; padding:13px 20px; max-width:var(--container); margin:0 auto; }
+.header-inner{ display:flex; align-items:center; gap:18px; padding:9px 20px; max-width:var(--container); margin:0 auto; }
 .brand{ display:flex; align-items:center; gap:10px; flex:none; color:var(--ink); }
 .brand-mark{ width:32px; height:32px; border-radius:var(--radius-sm); background:linear-gradient(135deg,#e8edf1 0%,#a9b5c0 55%,#d3dae0 100%); border:1.5px solid #8d9aa6; display:flex; align-items:center; justify-content:center; flex:none; }
 .brand-mark svg{ width:20px; height:20px; color:var(--silver-ink); }
 .brand-name{ font-family:var(--font-display); font-weight:800; font-size:18.5px; letter-spacing:.01em; white-space:nowrap; }
 .brand-name b{ color:var(--silver); font-weight:800; }
+.brand-logo{ display:block; height:46px; width:auto; max-width:100%; }
+.brand-logo-lg{ height:56px; }
+@media (max-width:560px){ .brand-logo{ height:38px; } }
 .header-search{ flex:1; display:flex; max-width:460px; }
 .header-search-box{ display:flex; align-items:center; gap:8px; background:var(--bg-elev); border:1.5px solid var(--line-dark); border-radius:var(--radius-md); padding:8px 8px 8px 14px; width:100%; transition:border-color .15s; }
 .header-search-box:focus-within{ border-color:var(--silver); }
