@@ -200,7 +200,7 @@ async function storageSet(key, value, shared){
 }
 
 const state = {
-  vehicles: [], myVehicles: [], rentals: [], reports: [], messages: [], favorites: [], history: [], notifications: [], ratings: [],
+  vehicles: [], myVehicles: [], rentals: [], myRentals: [], reports: [], messages: [], favorites: [], history: [], notifications: [], ratings: [],
   session: null,
   route: { name:'home', params:{} },
   filters: {},
@@ -392,12 +392,14 @@ function renderSignupPage(){
         <div class="field"><label>Confirmar palavra-passe</label><input type="password" name="password2" required minlength="6" autocomplete="new-password"></div>
       </div>
       <div class="field">
-        <label>O que pretendes fazer na plataforma?</label>
+        <label>Tipo de conta</label>
         <div class="role-select-row">
-          <label class="role-option"><input type="checkbox" name="papelComprador" checked>${icon('search')}<span>Quero comprar</span></label>
-          <label class="role-option"><input type="checkbox" name="papelVendedor">${icon('tag')}<span>Quero vender</span></label>
+          <label class="role-option"><input type="radio" name="tipoConta" value="comprador">${icon('search')}<span style="display:block;font-weight:700;">Comprador</span><small style="display:block;font-weight:500;color:var(--text-faint);font-size:11px;margin-top:3px;text-transform:none;letter-spacing:0;line-height:1.3;">Pesquisar e contactar vendedores</small></label>
+          <label class="role-option"><input type="radio" name="tipoConta" value="vendedor">${icon('tag')}<span style="display:block;font-weight:700;">Vendedor particular</span><small style="display:block;font-weight:500;color:var(--text-faint);font-size:11px;margin-top:3px;text-transform:none;letter-spacing:0;line-height:1.3;">Anunciar os meus carros</small></label>
+          <label class="role-option"><input type="radio" name="tipoConta" value="stand">${icon('building')}<span style="display:block;font-weight:700;">Stand</span><small style="display:block;font-weight:500;color:var(--text-faint);font-size:11px;margin-top:3px;text-transform:none;letter-spacing:0;line-height:1.3;">Vender vários veículos</small></label>
+          <label class="role-option"><input type="radio" name="tipoConta" value="rentacar">${icon('key')}<span style="display:block;font-weight:700;">Rent-a-car</span><small style="display:block;font-weight:500;color:var(--text-faint);font-size:11px;margin-top:3px;text-transform:none;letter-spacing:0;line-height:1.3;">Disponibilizar carros para aluguer</small></label>
         </div>
-        <span class="field-hint">Podes escolher as duas — e ativar a outra mais tarde no perfil.</span>
+        <span class="field-hint">Define o que podes fazer na plataforma — escolhe com atenção.</span>
       </div>
       <label class="terms-row"><input type="checkbox" name="termos" required> Li e aceito os <button type="button" class="link-btn" data-action="show-terms">Termos de Utilização</button> e a <button type="button" class="link-btn" data-action="show-privacy">Política de Privacidade</button>.</label>
       <div class="field-error" id="signup-error" style="display:none;"></div>
@@ -505,6 +507,7 @@ const ACCOUNT_PLANS = {
     beneficios: ['Tudo o que o plano Concessionária inclui', 'Gestor de conta dedicado', 'Upload em massa de anúncios', 'Faturação personalizada', 'Banner de topo garantido em Luanda e nas principais províncias']
   }
 };
+const ACCOUNT_TYPE_LABELS = { comprador:'Comprador', vendedor:'Vendedor particular', stand:'Stand', rentacar:'Rent-a-car' };
 const DEFAULT_PLAN = 'free';
 function currentPlanInfo(){ return ACCOUNT_PLANS[(state.session && state.session.plan) || DEFAULT_PLAN] || ACCOUNT_PLANS[DEFAULT_PLAN]; }
 // Todos os planos pagos (todos exceto "free") dão direito ao selo de vendedor
@@ -594,16 +597,11 @@ function bindAuthPageEvents(mode){
 
           autenticado: true,
 
-          papeis: {
-            comprador: true,
-            vendedor: true
-          },
+          tipoConta: data.user.tipo_conta || 'comprador',
 
           emailVerificado: false,
 
           telefoneVerificado: false,
-
-          tipo: 'particular',
 
           verificado: false,
 
@@ -677,6 +675,10 @@ function bindAuthPageEvents(mode){
           (fd.get('provincia') || '').trim();
 
 
+        const tipoConta =
+          (fd.get('tipoConta') || '').trim();
+
+
         const password =
           fd.get('password') || '';
 
@@ -693,6 +695,17 @@ function bindAuthPageEvents(mode){
 
 
         // VALIDAR CAMPOS
+
+        if(!tipoConta){
+
+          err.textContent =
+            'Escolhe o tipo de conta: comprador, vendedor particular, stand ou rent-a-car.';
+
+          err.style.display = 'block';
+
+          return;
+
+        }
 
         if(!nome || !email || !telefone || !provincia){
 
@@ -770,7 +783,9 @@ function bindAuthPageEvents(mode){
 
                 phone: telefone,
 
-                province: provincia
+                province: provincia,
+
+                tipo_conta: tipoConta
 
               })
 
@@ -1004,7 +1019,8 @@ function afterNavigate(){
     state.route = { name:'login', params:{ returnTo: hashFor(pendingAuthReturn.name, pendingAuthReturn.params) } };
   }
   if(state.route.name==='detail' && state.route.params.id) registerView(state.route.params.id);
-  if((state.route.name==='seller' || state.route.name==='publish') && isAuthed()) loadMyCarsFromAPI();
+  if((state.route.name==='seller' || state.route.name==='publish') && isAuthed() && state.session && ['vendedor','stand'].includes(state.session.tipoConta)) loadMyCarsFromAPI();
+  if(state.route.name==='seller' && isAuthed() && state.session && state.session.tipoConta==='rentacar') loadMyRentalsFromAPI();
   if(state.route.name==='rentals') loadRentalsFromAPI();
   renderRoute();
 }
@@ -1029,7 +1045,35 @@ function updateActiveNav(){
 /* Preenche o slot de autenticação no cabeçalho (desktop) e no menu móvel:
    link de "Entrar" quando não há sessão, ou nome + "Sair" quando há.
    Chamada a partir de renderRoute() em todos os renders. */
+function canPublishCars(){ return !!(isAuthed() && state.session && ['vendedor','stand'].includes(state.session.tipoConta)); }
+function homeCtaBannerHtml(){
+  if(isAuthed() && !canPublishCars()) return '';
+  const btn = canPublishCars()
+    ? `<a class="btn btn-gold" href="${hashFor('publish',{})}">${icon('plus')} Publicar anúncio grátis</a>`
+    : `<a class="btn btn-gold" href="${hashFor('signup',{})}">${icon('userPlus')} Criar conta</a>`;
+  return `<section class="section"><div class="container"><div class="cta-banner"><div><h3>Pronto para vender o teu carro?</h3><p>Cria a tua conta e publica o anúncio em poucos minutos.</p></div>${btn}</div></div></section>`;
+}
+/* Mostra/esconde os links do menu que dependem do tipo de conta. É só
+   conveniência de interface — a proteção a sério está no backend
+   (middleware accountTypeMiddleware) e nas verificações de cada página. */
+function applyAccountTypeVisibility(){
+  const tipo = isAuthed() && state.session ? state.session.tipoConta : null;
+  qsa('[data-requires-type]').forEach(el=>{
+    const permitidos = (el.getAttribute('data-requires-type')||'').split(/\s+/).filter(Boolean);
+    const visivel = !!tipo && permitidos.includes(tipo);
+    el.style.display = visivel ? '' : 'none';
+    const labelRentacar = el.getAttribute('data-label-rentacar');
+    if(labelRentacar && visivel){
+      const span = el.querySelector('span');
+      if(span){
+        if(!el.hasAttribute('data-label-default')) el.setAttribute('data-label-default', span.textContent);
+        span.textContent = tipo==='rentacar' ? labelRentacar : el.getAttribute('data-label-default');
+      }
+    }
+  });
+}
 function renderHeaderAuthSlot(){
+  applyAccountTypeVisibility();
   const html = isAuthed()
     ? `<a class="nav-link" data-nav-route="buyer" href="${hashFor('buyer',{tab:'perfil'})}" title="${escapeHtml(state.session.nome||'')}">${icon('user')}<span>${escapeHtml((state.session.nome||'Conta').split(' ')[0])}</span></a><button type="button" class="nav-link" data-action="logout">${icon('logout')}<span>Sair</span></button>`
     : `<a class="nav-link" data-nav-route="login" href="${hashFor('login',{})}">${icon('login')}<span>Entrar</span></a>`;
@@ -1165,7 +1209,7 @@ function renderRentalsPage(){
     <form id="rental-filter-form" class="search-bar" style="margin:18px 0;">
       <select name="provincia"><option value="">Todas as províncias</option>${selectOptions(PROVINCES, provFiltro)}</select>
       <button type="submit" class="btn btn-primary">${icon('search')} Filtrar</button>
-      <a href="${hashFor('publishRental',{})}" class="btn btn-secondary">${icon('plus')} Publicar o meu carro</a>
+      ${state.session && state.session.tipoConta==='rentacar' ? `<a href="${hashFor('seller',{})}" class="btn btn-secondary">${icon('layout-dashboard')} Painel do prestador</a>` : ''}
     </form>
     <div class="car-grid">
       ${filtrados.length ? filtrados.map(rentalCardHtml).join('') : carCardSkeletonEmpty('Ainda sem carros para alugar', provFiltro?'Tenta outra província ou vê todas.':'Sê o primeiro a publicar um carro para aluguer.')}
@@ -1219,6 +1263,9 @@ function removeRentalPhoto(idx){ const f=publishRentalFiles[idx]; if(f){ try{URL
 function refreshRentalImagePreviewGrid(){ const grid = qs('#rental-image-preview-grid'); if(grid) grid.innerHTML = renderRentalImagePreviewGrid(); }
 
 function renderPublishRentalPage(){
+  if(!state.session || state.session.tipoConta !== 'rentacar'){
+    return accountTypeGateHtml(['rentacar'], 'Conta sem acesso a aluguer', 'Só contas rent-a-car podem publicar veículos para aluguer. A tua conta é do tipo "'+(ACCOUNT_TYPE_LABELS[state.session&&state.session.tipoConta]||'Comprador')+'".');
+  }
   publishRentalFiles = [];
   return `<div class="container section-tight">
     <div class="page-head"><h1 class="page-title">Publicar carro para aluguer</h1><p class="page-sub">Preenche os dados — fica disponível de imediato em "Alugar".</p></div>
@@ -1411,7 +1458,9 @@ function renderHome(){
       <p class="hero-sub">Pesquisa por marca, preço, província ou combustível. Preços sempre em Kwanza, contactos verificados, sem intermediários.</p>
       <div class="hero-ctas">
         <a class="btn btn-gold" href="${hashFor('search',{})}">${icon('search')} Comprar carro</a>
-        <a class="btn btn-outline-light" href="${hashFor('publish',{})}">${icon('plus')} Vender carro</a>
+        ${canPublishCars()
+          ? `<a class="btn btn-outline-light" href="${hashFor('publish',{})}">${icon('plus')} Vender carro</a>`
+          : `<a class="btn btn-outline-light" href="${hashFor('rentals',{})}">${icon('key')} Alugar carro</a>`}
       </div>
       <div class="hero-search-card">
         <form id="hero-search-form">
@@ -1493,14 +1542,7 @@ function renderHome(){
     </div>
   </section>
 
-  <section class="section">
-    <div class="container">
-      <div class="cta-banner">
-        <div><h3>Pronto para vender o teu carro?</h3><p>Cria a tua conta e publica o anúncio em poucos minutos.</p></div>
-        <a class="btn btn-gold" href="${hashFor('publish',{})}">${icon('plus')} Publicar anúncio grátis</a>
-      </div>
-    </div>
-  </section>`;
+  ${homeCtaBannerHtml()}`;
 }
 function bindHomeEvents(){
   const form = qs('#hero-search-form');
@@ -2035,7 +2077,7 @@ function renderPublishPreviewWrap(){
   </div>`;
 }
 function renderPublish(){
-  if(!state.session || !state.session.papeis || !state.session.papeis.vendedor) return sellerActivationPromptHtml();
+  if(!state.session || !['vendedor','stand'].includes(state.session.tipoConta)) return accountTypeGateHtml(['vendedor','stand'], 'Conta sem acesso a vendas', 'Só contas de vendedor particular ou stand podem publicar carros para venda. A tua conta é do tipo "' + (ACCOUNT_TYPE_LABELS[state.session&&state.session.tipoConta]||'Comprador') + '".');
   const editId = state.route.params.editId;
   if(!editId && !hasUnlimitedPlan() && mySellerListings().length >= currentPlanInfo().limite) return planLimitReachedHtml();
   const routeKey = editId || 'new';
@@ -2398,11 +2440,8 @@ function openConfirmModal(opts){
 function emptyStateHtml(iconName, title, sub, navName, navLabel){
   return `<div class="empty-state">${icon(iconName)}<h4>${escapeHtml(title)}</h4><p>${escapeHtml(sub)}</p>${navName?`<a class="btn btn-primary" href="${hashFor(navName,{})}">${escapeHtml(navLabel)}</a>`:''}</div>`;
 }
-function sellerActivationPromptHtml(){
-  if(!state.session){
-    return `<div class="container section-tight"><div class="empty-state">${icon('tag')}<h4>Precisas de sessão iniciada</h4><p>Entra ou cria uma conta para poderes vender carros no AutoMercado.</p><a class="btn btn-primary" href="${hashFor('login',{})}">${icon('login')} Entrar ou criar conta</a></div></div>`;
-  }
-  return `<div class="container section-tight"><div class="empty-state">${icon('tag')}<h4>Ativa o modo vendedor</h4><p>A tua conta ainda não tem a opção de vender ativada. Ativa para poderes publicar anúncios.</p><button type="button" class="btn btn-primary" data-action="activate-seller">${icon('tag')} Ativar modo vendedor</button></div></div>`;
+function accountTypeGateHtml(tiposPermitidos, titulo, mensagem){
+  return `<div class="container section-tight"><div class="empty-state">${icon('shieldAlert')}<h4>${escapeHtml(titulo)}</h4><p>${escapeHtml(mensagem)}</p><a class="btn btn-secondary" href="${hashFor('home',{})}" style="margin-top:4px;">${icon('arrowLeft')} Voltar ao início</a></div></div>`;
 }
 function planLimitReachedHtml(){
   const total = mySellerListings().length;
@@ -2453,14 +2492,8 @@ function accountFormHtml(){
       <div class="field"><label>Email</label><input type="email" value="${escapeHtml(s.email||'')}" disabled></div>
       <div class="field"><label>Telefone</label><input type="text" name="telefone" value="${escapeHtml(s.telefone)}" required></div>
       <div class="field"><label>Província</label><select name="provincia">${selectOptions(PROVINCES, s.provincia)}</select></div>
-      <div class="field"><label>Tipo de conta (para venda)</label><div class="role-select-row">
-        <label class="role-option"><input type="radio" name="tipo" value="particular" ${s.tipo!=='stand'?'checked':''}>${icon('user')}<span>Particular</span></label>
-        <label class="role-option"><input type="radio" name="tipo" value="stand" ${s.tipo==='stand'?'checked':''}>${icon('building')}<span>Stand</span></label>
-      </div></div>
-      <div class="field"><label>Utilização da conta</label><div class="role-select-row">
-        <label class="role-option"><input type="checkbox" name="papelComprador" ${s.papeis&&s.papeis.comprador?'checked':''}>${icon('search')}<span>Comprar</span></label>
-        <label class="role-option"><input type="checkbox" name="papelVendedor" ${s.papeis&&s.papeis.vendedor?'checked':''}>${icon('tag')}<span>Vender</span></label>
-      </div></div>
+      <div class="kv-row"><span>Tipo de conta</span><span><b>${escapeHtml(ACCOUNT_TYPE_LABELS[s.tipoConta]||'Comprador')}</b></span></div>
+      <span class="field-hint">O tipo de conta é definido no registo e define o que podes fazer na plataforma. Para mudares, contacta o suporte.</span>
       <div class="kv-row"><span>Email</span><span>${s.emailVerificado?`<span class="badge badge-verified">${icon('checkCircle')}Verificado</span>`:'Não verificado'}</span></div>
       <div class="kv-row"><span>Telefone</span><span>${s.telefoneVerificado?`<span class="badge badge-verified">${icon('checkCircle')}Verificado</span>`:'Não verificado'}</span></div>
       ${(!s.emailVerificado||!s.telefoneVerificado)?`<a href="${hashFor('verify',{})}" class="btn btn-secondary btn-block" style="margin-top:10px;">${icon('shieldCheck')} Verificar conta</a>`:''}
@@ -2475,17 +2508,15 @@ function bindAccountForm(){
   if(f) f.addEventListener('submit', async (e)=>{
     e.preventDefault();
     const fd = new FormData(e.target);
-    const papeis = { comprador: fd.get('papelComprador')==='on', vendedor: fd.get('papelVendedor')==='on' };
-    if(!papeis.comprador && !papeis.vendedor){ showToast('Escolhe pelo menos uma opção: comprar ou vender', {error:true}); return; }
 
     const nome = (fd.get('nome') || '').trim();
     const telefone = (fd.get('telefone') || '').trim();
     const provincia = (fd.get('provincia') || '').trim();
 
-    // Grava nome e telefone no servidor (tabela users) — é o mesmo
-    // telefone que os compradores passam a usar para contactar esta
-    // conta quando ela vende um carro. Tipo de conta e papéis ainda só
-    // existem localmente: o backend não tem essas colunas.
+    // Grava nome, telefone e província no servidor (tabela users) — é o
+    // mesmo telefone que os compradores passam a usar para contactar esta
+    // conta quando ela vende um carro. O tipo de conta NÃO se altera aqui
+    // de propósito: é definido no registo e validado sempre no servidor.
     const token = localStorage.getItem('token');
 
     if(token){
@@ -2512,7 +2543,7 @@ function bindAccountForm(){
       }
     }
 
-    state.session = Object.assign({}, state.session, { nome, telefone, provincia, tipo:fd.get('tipo'), papeis });
+    state.session = Object.assign({}, state.session, { nome, telefone, provincia });
     saveSession(); showToast('Dados atualizados'); rerenderCurrentView();
   });
 }
@@ -2572,12 +2603,22 @@ function messageItemHtml(m){
   </div>`;
 }
 function renderSeller(){
-  if(!state.session || !state.session.papeis || !state.session.papeis.vendedor) return sellerActivationPromptHtml();
+  const tipoConta = state.session && state.session.tipoConta;
+  if(!state.session || !['vendedor','stand','rentacar'].includes(tipoConta)){
+    return accountTypeGateHtml(['vendedor','stand','rentacar'], 'Conta sem painel de gestão', 'Este painel é só para contas de vendedor, stand ou rent-a-car. A tua conta é do tipo "'+(ACCOUNT_TYPE_LABELS[tipoConta]||'Comprador')+'".');
+  }
+  const souRentACar = tipoConta === 'rentacar';
   const tab = state.route.params.tab || 'anuncios';
-  const mine = mySellerListings();
-  const tabs = [['anuncios','Meus anúncios','list'],['mensagens','Mensagens','message'],['estatisticas','Estatísticas','barChart'],['dados','Dados da conta','user']];
+  const mine = souRentACar ? myRentalListings() : mySellerListings();
+  const tabs = souRentACar
+    ? [['anuncios','Os meus veículos','key'],['estatisticas','Estatísticas','barChart'],['dados','Dados da conta','user']]
+    : [['anuncios','Meus anúncios','list'],['mensagens','Mensagens','message'],['estatisticas','Estatísticas','barChart'],['dados','Dados da conta','user']];
   let panel = '';
-  if(tab==='mensagens'){
+  if(souRentACar && tab==='anuncios'){
+    panel = `<div class="dash-panel-head"><h2>Os meus veículos para aluguer</h2><a class="btn btn-primary btn-sm" href="${hashFor('publishRental',{})}">${icon('plus')} Novo aluguer</a></div>
+      <div class="stat-strip"><div class="stat-item"><div class="stat-value">${mine.filter(r=>r.status==='approved').length}</div><div class="stat-label">Ativos</div></div><div class="stat-item"><div class="stat-value">${mine.filter(r=>r.status==='rented').length}</div><div class="stat-label">Alugados</div></div></div>
+      ${mine.length ? mine.map(rentalListingRowHtml).join('') : emptyStateHtml('key','Ainda não tens veículos para aluguer','Publica o teu primeiro carro para aluguer.','publishRental','Publicar aluguer')}`;
+  } else if(tab==='mensagens' && !souRentACar){
     const msgs = myMessages().slice().sort((a,b)=> new Date(b.criadoEm)-new Date(a.criadoEm));
     panel = `<div class="dash-panel-head"><h2>Mensagens recebidas</h2></div>${msgs.length?msgs.map(messageItemHtml).join(''):emptyStateHtml('bell','Sem mensagens ainda','As mensagens de compradores interessados vão aparecer aqui.')}`;
   } else if(tab==='estatisticas'){
@@ -2595,7 +2636,7 @@ function renderSeller(){
         <div class="stat-strip">
           <div class="stat-item"><div class="stat-value">${formatNum(totalViews)}</div><div class="stat-label">Visualizações totais</div></div>
           <div class="stat-item"><div class="stat-value">${formatNum(totalContactos)}</div><div class="stat-label">Contactos recebidos</div></div>
-          <div class="stat-item"><div class="stat-value">${mine.filter(v=>v.status==='ativo').length}</div><div class="stat-label">Anúncios ativos</div></div>
+          <div class="stat-item"><div class="stat-value">${mine.filter(v=>v.status===(souRentACar?'approved':'ativo')).length}</div><div class="stat-label">Anúncios ativos</div></div>
         </div>
         <div class="admin-panel"><h3>${icon('barChart')}Visualizações por anúncio</h3>${top.length?`<div class="bar-chart">${top.map(v=>`<div class="bar-row"><span class="bar-name">${escapeHtml(v.marca+' '+v.modelo)}</span><div class="bar-track"><div class="bar-fill" style="width:${Math.max(4,(v.visualizacoes||0)/maxV*100)}%;"></div></div><span class="bar-val">${formatNum(v.visualizacoes||0)}</span></div>`).join('')}</div>`:'<p style="font-size:13px;color:var(--text-dim);">Publica um anúncio para veres estatísticas.</p>'}</div>`;
     }
@@ -2607,7 +2648,7 @@ function renderSeller(){
       ${mine.length ? mine.map(listingRowHtml).join('') : emptyStateHtml('tag','Ainda não tens anúncios','Publica o teu primeiro carro e chega a milhares de compradores.','publish','Publicar anúncio')}`;
   }
   return `<div class="container dash-layout">
-    <aside class="dash-side">${state.session?`<div class="dash-user"><div class="seller-avatar" style="width:38px;height:38px;font-size:13.5px;">${initials(state.session.nome)}</div><div><div style="font-weight:800;font-size:13.5px;display:flex;align-items:center;gap:5px;">${escapeHtml(state.session.nome)}${isVerifiedPlan(state.session.plan)?`<span class="badge badge-verified" style="padding:1px 6px;">${icon('badgeCheck')}</span>`:''}</div><div style="font-size:11.5px;color:var(--text-faint);">${state.session.tipo==='stand'?'Stand':'Particular'} · ${escapeHtml(currentPlanInfo().nome)}</div></div></div>`:''}${dashTabsHtml(tab,tabs,'seller')}</aside>
+    <aside class="dash-side">${state.session?`<div class="dash-user"><div class="seller-avatar" style="width:38px;height:38px;font-size:13.5px;">${initials(state.session.nome)}</div><div><div style="font-weight:800;font-size:13.5px;display:flex;align-items:center;gap:5px;">${escapeHtml(state.session.nome)}${isVerifiedPlan(state.session.plan)?`<span class="badge badge-verified" style="padding:1px 6px;">${icon('badgeCheck')}</span>`:''}</div><div style="font-size:11.5px;color:var(--text-faint);">${ACCOUNT_TYPE_LABELS[state.session.tipoConta]||'Comprador'} · ${escapeHtml(currentPlanInfo().nome)}</div></div></div>`:''}${dashTabsHtml(tab,tabs,'seller')}</aside>
     <div>${panel}</div>
   </div>`;
 }
@@ -2721,6 +2762,71 @@ function deleteListing(id){
     }
   }});
 }
+function rentalStatusBadgeHtml(r){
+  if(r.status==='rented') return `<span class="badge badge-sold">${icon('checkCircle')} Alugado</span>`;
+  if(r.status==='pendente'||r.status==='pending') return `<span class="badge badge-pending">${icon('clock')} Pendente</span>`;
+  if(r.status==='paused'||r.status==='pausado') return `<span class="badge badge-paused">${icon('pause')} Pausado</span>`;
+  return `<span class="badge badge-active">${icon('checkCircle')} Ativo</span>`;
+}
+function rentalListingRowActionsHtml(r){
+  const acoes = [];
+  if(r.status==='approved') acoes.push(`<button class="icon-btn" data-action="pause-rental" data-id="${r.id}" title="Pausar">${icon('pause')}</button>`);
+  if(r.status==='paused') acoes.push(`<button class="icon-btn" data-action="resume-rental" data-id="${r.id}" title="Reativar">${icon('play')}</button>`);
+  if(r.status!=='rented') acoes.push(`<button class="icon-btn" data-action="rented-listing" data-id="${r.id}" title="Marcar como alugado">${icon('checkCircle')}</button>`);
+  acoes.push(`<button class="icon-btn" data-action="delete-rental" data-id="${r.id}" title="Apagar">${icon('trash')}</button>`);
+  return acoes.join('');
+}
+function rentalListingRowHtml(r){
+  return `<div class="listing-row">
+    <div class="listing-thumb">${mediaPlaceholder(r.id, r.fotos[0])}</div>
+    <div class="listing-info"><div class="li-title">${escapeHtml(r.marca)} ${escapeHtml(r.modelo)}</div><div class="li-meta">${r.ano} · ${escapeHtml(r.cidade||r.provincia)} · ${formatKz(r.precoDia)}/dia</div>${rentalStatusBadgeHtml(r)}</div>
+    <div class="listing-stats"><div><b>${formatNum(r.visualizacoes)}</b>vistas</div><div><b>${formatNum(r.contactos)}</b>contactos</div></div>
+    <div class="row-actions">${rentalListingRowActionsHtml(r)}</div>
+  </div>`;
+}
+async function pauseRental(id){
+  try{
+    await apiFetch(`/rentals/${id}/status`, { method:'PATCH', body: JSON.stringify({ status:'paused' }) });
+    await refreshRentalLists();
+    showToast('Aluguer pausado');
+  }catch(error){
+    console.error('Erro ao pausar aluguer:', error);
+    showToast(error.message || 'Não foi possível pausar o aluguer.', { error:true });
+  }
+}
+async function resumeRental(id){
+  try{
+    await apiFetch(`/rentals/${id}/status`, { method:'PATCH', body: JSON.stringify({ status:'approved' }) });
+    await refreshRentalLists();
+    showToast('Aluguer reativado');
+  }catch(error){
+    console.error('Erro ao reativar aluguer:', error);
+    showToast(error.message || 'Não foi possível reativar o aluguer.', { error:true });
+  }
+}
+async function markRented(id){
+  try{
+    await apiFetch(`/rentals/${id}/status`, { method:'PATCH', body: JSON.stringify({ status:'rented' }) });
+    await refreshRentalLists();
+    showToast('Aluguer marcado como alugado');
+  }catch(error){
+    console.error('Erro ao marcar aluguer:', error);
+    showToast(error.message || 'Não foi possível atualizar o aluguer.', { error:true });
+  }
+}
+function deleteRentalListing(id){
+  const r = state.myRentals.find(x=>x.id===id); if(!r) return;
+  openConfirmModal({ title:'Apagar aluguer', message:`Tens a certeza que queres apagar "${r.marca} ${r.modelo}"? Esta ação não pode ser desfeita.`, confirmLabel:'Apagar', danger:true, onConfirm: async ()=>{
+    try{
+      await apiFetch(`/rentals/${id}`, { method:'DELETE' });
+      await refreshRentalLists();
+      showToast('Aluguer apagado');
+    }catch(error){
+      console.error('Erro ao apagar aluguer:', error);
+      showToast(error.message || 'Não foi possível apagar o aluguer.', { error:true });
+    }
+  }});
+}
 function clearProfile(){
   openConfirmModal({ title:'Apagar conta', message:'Isto termina a sessão e apaga os teus dados de conta guardados neste dispositivo (nome, contactos, verificações). Os anúncios já publicados continuam no marketplace. Esta ação não pode ser desfeita.', confirmLabel:'Apagar conta', danger:true, onConfirm:()=>{
     state.session=null; saveSession(); showToast('Conta apagada deste dispositivo'); navigate('home',{});
@@ -2733,13 +2839,7 @@ function logout(){
   showToast('Sessão terminada');
   navigate('home', {});
 }
-function activateSeller(){
-  if(!state.session) return;
-  state.session.papeis = Object.assign({}, state.session.papeis, { vendedor: true });
-  saveSession();
-  showToast('Modo vendedor ativado');
-  rerenderCurrentView();
-}
+
 function toggleFavorite(id){
   if(state.favorites.includes(id)){ state.favorites = state.favorites.filter(x=>x!==id); showToast('Removido dos favoritos'); }
   else { state.favorites = [...state.favorites, id]; showToast('Adicionado aos favoritos'); }
@@ -2829,7 +2929,11 @@ function globalClickHandler(e){
     case 'resume-listing': resumeListing(id); break;
     case 'sold-listing': markSold(id); break;
     case 'delete-listing': deleteListing(id); break;
-    case 'activate-seller': activateSeller(); break;
+    case 'pause-rental': pauseRental(id); break;
+    case 'resume-rental': resumeRental(id); break;
+    case 'rented-listing': markRented(id); break;
+    case 'delete-rental': deleteRentalListing(id); break;
+
     case 'send-verify': sendVerifyCode(t.getAttribute('data-channel')); break;
     case 'confirm-verify': confirmVerifyCode(t.getAttribute('data-channel')); break;
     case 'toggle-pw': { const inp=qs('#'+t.getAttribute('data-target')); if(inp) inp.type = inp.type==='password'?'text':'password'; break; }
@@ -3103,6 +3207,20 @@ async function loadRentalsFromAPI(){
     console.error('ERRO loadRentalsFromAPI:', error);
     return state.rentals;
   }
+}
+async function loadMyRentalsFromAPI(){
+  try{
+    state.myRentals = await loadMyRentals();
+    rerenderCurrentView();
+    return state.myRentals;
+  }catch(error){
+    console.error('ERRO loadMyRentalsFromAPI:', error);
+    return state.myRentals;
+  }
+}
+function myRentalListings(){ return state.myRentals; }
+async function refreshRentalLists(){
+  await Promise.all([loadRentalsFromAPI(), loadMyRentalsFromAPI()]);
 }
 
 async function initApp(routeName, routeParams) {
