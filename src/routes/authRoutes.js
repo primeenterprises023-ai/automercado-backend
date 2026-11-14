@@ -6,6 +6,8 @@ const authMiddleware = require("../middleware/authMiddleware");
 
 const router = express.Router();
 
+const TIPOS_CONTA_VALIDOS = ["comprador", "vendedor", "stand", "rentacar"];
+
 
 // ========================
 // REGISTO
@@ -13,11 +15,17 @@ const router = express.Router();
 
 router.post("/register", async (req, res) => {
   try {
-    const { name, email, password, province } = req.body;
+    const { name, email, password, province, tipo_conta } = req.body;
 
     if (!name || !email || !password) {
       return res.status(400).json({
         error: "Preencha todos os campos"
+      });
+    }
+
+    if (!tipo_conta || !TIPOS_CONTA_VALIDOS.includes(tipo_conta)) {
+      return res.status(400).json({
+        error: "Escolhe um tipo de conta válido (comprador, vendedor, stand ou rentacar)"
       });
     }
 
@@ -30,7 +38,8 @@ router.post("/register", async (req, res) => {
           name,
           email,
           password: hashedPassword,
-          province
+          province,
+          tipo_conta
         }
       ])
       .select();
@@ -47,7 +56,8 @@ router.post("/register", async (req, res) => {
         id: data[0].id,
         name: data[0].name,
         email: data[0].email,
-        province: data[0].province
+        province: data[0].province,
+        tipo_conta: data[0].tipo_conta
       }
     });
 
@@ -117,7 +127,8 @@ router.post("/login", async (req, res) => {
         name: user.name,
         email: user.email,
         phone: user.phone,
-        province: user.province
+        province: user.province,
+        tipo_conta: user.tipo_conta
       }
     });
 
@@ -140,7 +151,7 @@ router.get("/me", authMiddleware, async (req, res) => {
 
     const { data: user, error } = await supabase
       .from("users")
-      .select("id, name, email, province, created_at")
+      .select("id, name, email, province, tipo_conta, created_at")
       .eq("id", req.user.id)
       .single();
 

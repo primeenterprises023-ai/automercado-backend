@@ -3,6 +3,10 @@ const supabase = require("../config/supabase");
 const authMiddleware = require("../middleware/authMiddleware");
 const upload = require("../middleware/uploadMiddleware");
 const { PLAN_LIMITS, PLAN_RANK } = require("../config/planLimits");
+const requireAccountType = require("../middleware/accountTypeMiddleware");
+
+// Só contas rent-a-car podem publicar/editar/apagar alugueres.
+const soRentACar = requireAccountType("rentacar");
 
 const router = express.Router();
 
@@ -12,7 +16,7 @@ const router = express.Router();
 // POST /api/rentals
 // ==========================================
 
-router.post("/", authMiddleware, async (req, res) => {
+router.post("/", authMiddleware, soRentACar, async (req, res) => {
   try {
     const {
       brand,
@@ -344,7 +348,7 @@ router.post("/:id/contact", async (req, res) => {
 // PUT /api/rentals/:id
 // ==========================================
 
-router.put("/:id", authMiddleware, async (req, res) => {
+router.put("/:id", authMiddleware, soRentACar, async (req, res) => {
   try {
     const { data: rental, error: rentalError } = await supabase
       .from("rentals")
@@ -424,7 +428,7 @@ router.put("/:id", authMiddleware, async (req, res) => {
 // PATCH /api/rentals/:id/status
 // ==========================================
 
-router.patch("/:id/status", authMiddleware, async (req, res) => {
+router.patch("/:id/status", authMiddleware, soRentACar, async (req, res) => {
   try {
     const { status } = req.body;
     const allowed = ["paused", "approved", "rented"];
@@ -513,7 +517,7 @@ router.patch("/:id/status", authMiddleware, async (req, res) => {
 // DELETE /api/rentals/:id
 // ==========================================
 
-router.delete("/:id", authMiddleware, async (req, res) => {
+router.delete("/:id", authMiddleware, soRentACar, async (req, res) => {
   try {
     const { data: rental, error: rentalError } = await supabase
       .from("rentals")
@@ -567,6 +571,7 @@ router.delete("/:id", authMiddleware, async (req, res) => {
 router.post(
   "/:id/images",
   authMiddleware,
+  soRentACar,
   upload.array("images", 10),
   async (req, res) => {
     try {

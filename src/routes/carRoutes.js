@@ -3,6 +3,10 @@ const supabase = require("../config/supabase");
 const authMiddleware = require("../middleware/authMiddleware");
 const upload = require("../middleware/uploadMiddleware");
 const { PLAN_LIMITS, PLAN_RANK } = require("../config/planLimits");
+const requireAccountType = require("../middleware/accountTypeMiddleware");
+
+// Só vendedor particular e stand podem publicar/editar/apagar carros.
+const soVendedores = requireAccountType("vendedor", "stand");
 
 const router = express.Router();
 
@@ -12,7 +16,7 @@ const router = express.Router();
 // POST /api/cars
 // ==========================================
 
-router.post("/", authMiddleware, async (req, res) => {
+router.post("/", authMiddleware, soVendedores, async (req, res) => {
   try {
     const {
       brand,
@@ -329,7 +333,7 @@ router.get("/:id", async (req, res) => {
 // PUT /api/cars/:id
 // ==========================================
 
-router.put("/:id", authMiddleware, async (req, res) => {
+router.put("/:id", authMiddleware, soVendedores, async (req, res) => {
   try {
 
     const { data: car, error: carError } = await supabase
@@ -424,7 +428,7 @@ router.put("/:id", authMiddleware, async (req, res) => {
 // PATCH /api/cars/:id/status
 // ==========================================
 
-router.patch("/:id/status", authMiddleware, async (req, res) => {
+router.patch("/:id/status", authMiddleware, soVendedores, async (req, res) => {
   try {
     const { status } = req.body;
     const allowed = ["paused", "approved", "sold"];
@@ -549,7 +553,7 @@ router.post("/:id/contact", async (req, res) => {
 // DELETE /api/cars/:id
 // ==========================================
 
-router.delete("/:id", authMiddleware, async (req, res) => {
+router.delete("/:id", authMiddleware, soVendedores, async (req, res) => {
   try {
 
     const { data: car, error: carError } = await supabase
@@ -604,6 +608,7 @@ router.delete("/:id", authMiddleware, async (req, res) => {
 router.post(
   "/:id/images",
   authMiddleware,
+  soVendedores,
   upload.array("images", 10),
   async (req, res) => {
 
