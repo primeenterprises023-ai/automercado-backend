@@ -1049,8 +1049,8 @@ function canPublishCars(){ return !!(isAuthed() && state.session && ['vendedor',
 function homeCtaBannerHtml(){
   if(isAuthed() && !canPublishCars()) return '';
   const btn = canPublishCars()
-    ? `<a class="btn btn-gold" href="${hashFor('publish',{})}">${icon('plus')} Publicar anúncio grátis</a>`
-    : `<a class="btn btn-gold" href="${hashFor('signup',{})}">${icon('userPlus')} Criar conta</a>`;
+    ? `<a class="btn btn-silver" href="${hashFor('publish',{})}">${icon('plus')} Publicar anúncio grátis</a>`
+    : `<a class="btn btn-silver" href="${hashFor('signup',{})}">${icon('userPlus')} Criar conta</a>`;
   return `<section class="section"><div class="container"><div class="cta-banner"><div><h3>Pronto para vender o teu carro?</h3><p>Cria a tua conta e publica o anúncio em poucos minutos.</p></div>${btn}</div></div></section>`;
 }
 /* Mostra/esconde os links do menu que dependem do tipo de conta. É só
@@ -1457,7 +1457,7 @@ function renderHome(){
       <h1 class="hero-title">Carros à venda em Angola, <em>de particulares e stands</em></h1>
       <p class="hero-sub">Pesquisa por marca, preço, província ou combustível. Preços sempre em Kwanza, contactos verificados, sem intermediários.</p>
       <div class="hero-ctas">
-        <a class="btn btn-gold" href="${hashFor('search',{})}">${icon('search')} Comprar carro</a>
+        <a class="btn btn-silver" href="${hashFor('search',{})}">${icon('search')} Comprar carro</a>
         ${canPublishCars()
           ? `<a class="btn btn-outline-light" href="${hashFor('publish',{})}">${icon('plus')} Vender carro</a>`
           : `<a class="btn btn-outline-light" href="${hashFor('rentals',{})}">${icon('key')} Alugar carro</a>`}
