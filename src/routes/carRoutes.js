@@ -3,6 +3,12 @@ const supabase = require("../config/supabase");
 const authMiddleware = require("../middleware/authMiddleware");
 const upload = require("../middleware/uploadMiddleware");
 const { PLAN_LIMITS, PLAN_RANK } = require("../config/planLimits");
+const {
+  isModerated,
+  moderatedMessage,
+  getSuspendedOwnerIds,
+  isOwnerSuspended
+} = require("../services/moderationGuard");
 const requireAccountType = require("../middleware/accountTypeMiddleware");
 
 // Só vendedor particular e stand podem publicar/editar/apagar carros.
@@ -190,7 +196,11 @@ router.get("/", async (req, res) => {
       sellerById[seller.id] = seller;
     }
 
+    // Contas suspensas pela moderação: os anúncios deixam de aparecer.
+    const suspendedSellers = await getSuspendedOwnerIds(sellerIds);
+
     const carsWithImages = cars
+      .filter(car => !suspendedSellers.has(car.user_id))
       .map(car => {
         const seller = sellerById[car.user_id];
 
@@ -278,6 +288,14 @@ router.get("/:id", async (req, res) => {
       });
     }
 
+    // Anúncios suspensos/rejeitados pela moderação, ou de contas
+    // suspensas, não são públicos.
+    if (isModerated(car.status) || await isOwnerSuspended(car.user_id)) {
+      return res.status(404).json({
+        error: "Carro não encontrado"
+      });
+    }
+
     const { data: images, error: imagesError } = await supabase
       .from("car_images")
       .select("*")
@@ -351,6 +369,12 @@ router.put("/:id", authMiddleware, soVendedores, async (req, res) => {
     if (car.user_id !== req.user.id) {
       return res.status(403).json({
         error: "Não tens permissão para editar este carro"
+      });
+    }
+
+    if (isModerated(car.status)) {
+      return res.status(403).json({
+        error: moderatedMessage(car.status)
       });
     }
 
@@ -454,6 +478,12 @@ router.patch("/:id/status", authMiddleware, soVendedores, async (req, res) => {
     if (car.user_id !== req.user.id) {
       return res.status(403).json({
         error: "Não tens permissão para alterar este carro"
+      });
+    }
+
+    if (isModerated(car.status)) {
+      return res.status(403).json({
+        error: moderatedMessage(car.status)
       });
     }
 
@@ -571,6 +601,12 @@ router.delete("/:id", authMiddleware, soVendedores, async (req, res) => {
     if (car.user_id !== req.user.id) {
       return res.status(403).json({
         error: "Não tens permissão para apagar este carro"
+      });
+    }
+
+    if (car.status === "suspended") {
+      return res.status(403).json({
+        error: "Este anúncio está suspenso pela moderação e não pode ser apagado. Contacta o suporte."
       });
     }
 

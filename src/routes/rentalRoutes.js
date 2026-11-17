@@ -3,6 +3,12 @@ const supabase = require("../config/supabase");
 const authMiddleware = require("../middleware/authMiddleware");
 const upload = require("../middleware/uploadMiddleware");
 const { PLAN_LIMITS, PLAN_RANK } = require("../config/planLimits");
+const {
+  isModerated,
+  moderatedMessage,
+  getSuspendedOwnerIds,
+  isOwnerSuspended
+} = require("../services/moderationGuard");
 const requireAccountType = require("../middleware/accountTypeMiddleware");
 
 // Só contas rent-a-car podem publicar/editar/apagar alugueres.
@@ -176,7 +182,11 @@ router.get("/", async (req, res) => {
       ownerById[owner.id] = owner;
     }
 
+    // Contas suspensas pela moderação: os anúncios deixam de aparecer.
+    const suspendedOwners = await getSuspendedOwnerIds(ownerIds);
+
     const rentalsWithImages = rentals
+      .filter(rental => !suspendedOwners.has(rental.user_id))
       .map(rental => {
         const owner = ownerById[rental.user_id];
 
@@ -255,6 +265,14 @@ router.get("/:id", async (req, res) => {
       .single();
 
     if (rentalError || !rental) {
+      return res.status(404).json({
+        error: "Aluguer não encontrado"
+      });
+    }
+
+    // Anúncios suspensos/rejeitados pela moderação, ou de contas
+    // suspensas, não são públicos.
+    if (isModerated(rental.status) || await isOwnerSuspended(rental.user_id)) {
       return res.status(404).json({
         error: "Aluguer não encontrado"
       });
@@ -368,6 +386,12 @@ router.put("/:id", authMiddleware, soRentACar, async (req, res) => {
       });
     }
 
+    if (isModerated(rental.status)) {
+      return res.status(403).json({
+        error: moderatedMessage(rental.status)
+      });
+    }
+
     const {
       brand,
       model,
@@ -457,6 +481,12 @@ router.patch("/:id/status", authMiddleware, soRentACar, async (req, res) => {
       });
     }
 
+    if (isModerated(rental.status)) {
+      return res.status(403).json({
+        error: moderatedMessage(rental.status)
+      });
+    }
+
     if (status === "approved" && rental.status !== "approved") {
       const { data: me } = await supabase
         .from("users")
@@ -534,6 +564,12 @@ router.delete("/:id", authMiddleware, soRentACar, async (req, res) => {
     if (rental.user_id !== req.user.id) {
       return res.status(403).json({
         error: "Não tens permissão para apagar este aluguer"
+      });
+    }
+
+    if (rental.status === "suspended") {
+      return res.status(403).json({
+        error: "Este anúncio está suspenso pela moderação e não pode ser apagado. Contacta o suporte."
       });
     }
 

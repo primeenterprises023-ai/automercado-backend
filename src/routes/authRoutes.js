@@ -108,6 +108,13 @@ router.post("/login", async (req, res) => {
       });
     }
 
+    // Contas suspensas pela moderação não podem iniciar sessão
+    if (user.account_status === "suspended") {
+      return res.status(403).json({
+        error: "Conta suspensa. Contacta o suporte."
+      });
+    }
+
     const token = jwt.sign(
       {
         id: user.id,
