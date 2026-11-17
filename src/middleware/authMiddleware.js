@@ -1,6 +1,14 @@
 const jwt = require("jsonwebtoken");
+const { getAccountState } = require("../services/moderationGuard");
 
-function authMiddleware(req, res, next) {
+// Verifica o token e, a seguir, se a conta ainda existe e não está
+// suspensa (a suspensão feita no painel vale logo, sem esperar que o
+// token expire). Se a base de dados não responder, deixa passar (falha em
+// aberto): as próprias rotas voltam a precisar da base de dados.
+async function authMiddleware(req, res, next) {
+
+  let decoded;
+
   try {
 
     const authHeader = req.headers.authorization;
@@ -21,14 +29,10 @@ function authMiddleware(req, res, next) {
 
     const token = parts[1];
 
-    const decoded = jwt.verify(
+    decoded = jwt.verify(
       token,
       process.env.JWT_SECRET
     );
-
-    req.user = decoded;
-
-    next();
 
   } catch (error) {
 
@@ -37,6 +41,30 @@ function authMiddleware(req, res, next) {
     });
 
   }
+
+  if (!decoded || !decoded.id) {
+    return res.status(401).json({
+      error: "Token inválido ou expirado"
+    });
+  }
+
+  const state = await getAccountState(decoded.id);
+
+  if (state === "suspended") {
+    return res.status(403).json({
+      error: "Conta suspensa. Contacta o suporte."
+    });
+  }
+
+  if (state === "missing") {
+    return res.status(401).json({
+      error: "Token inválido ou expirado"
+    });
+  }
+
+  req.user = decoded;
+
+  next();
 }
 
 module.exports = authMiddleware;
